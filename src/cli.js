@@ -6,10 +6,14 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import { chromium, expect } from '@playwright/test';
+import { initSite, batchSites } from './sites.js';
 
 const help = `Usage:
   lmwebtest test <url> [--status 200] [--title "Exact title"] [--selector CSS] [--timeout 10000]
   lmwebtest screenshot <url> --out <file.png> [--no-js] [--timeout 10000]
+  lmwebtest init <site-name> [--url <url>]
+  lmwebtest batch
+  lmwebtest run --all
   lmwebtest run [site-id|file|dir] [Playwright test options]
 
 Checks HTTP status (default 200), console errors, uncaught page errors, failed
@@ -20,6 +24,23 @@ Outputs JSON; exits 1 on failed checks and 2 on invalid arguments.
 
 async function main() {
   const [command, ...args] = process.argv.slice(2);
+  const workspace = fileURLToPath(new URL('../', import.meta.url));
+  if (command === 'init') {
+    try { console.log(JSON.stringify(await initSite(workspace, args), null, 2)); }
+    catch (error) { console.error(JSON.stringify({ ok: false, error: error.message })); process.exitCode = ['EACCES', 'ENOSPC', 'EROFS'].includes(error.code) ? 1 : 2; }
+    return;
+  }
+  if (command === 'batch' || (command === 'run' && args.includes('--all'))) {
+    if ((command === 'batch' && args.length) || (command === 'run' && (args.length !== 1 || args[0] !== '--all'))) {
+      console.error(JSON.stringify({ ok: false, error: 'Use batch or run --all without additional arguments' }));
+      process.exitCode = 2;
+      return;
+    }
+    const report = await batchSites(workspace);
+    console.log(JSON.stringify(report, null, 2));
+    process.exitCode = report.ok ? 0 : 1;
+    return;
+  }
   if (command === 'run') {
     const root = fileURLToPath(new URL('../', import.meta.url));
     let runnerArgs = [...args];

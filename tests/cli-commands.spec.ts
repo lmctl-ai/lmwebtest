@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFile, mkdtemp, rm } from 'node:fs/promises';
+import { readFile, mkdtemp, rm, mkdir, copyFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { basename, join } from 'node:path';
 
@@ -57,7 +57,7 @@ test('CLI run delegates to the test runner', async () => {
   expect(result.stdout).not.toContain('routes.spec.ts');
   const site = await run('run', '--list', 'localweb');
   expect(site.code, site.stderr).toBe(0);
-  expect(site.stdout).toContain('Total: 5 tests');
+  expect(site.stdout).toContain('Total: 1 test');
   expect(site.stdout).toContain('routes.spec.ts');
   expect(site.stdout).not.toContain('file-explorer.spec.ts');
   const file = await run('run', 'tests/security.spec.ts', '--list');
@@ -65,7 +65,7 @@ test('CLI run delegates to the test runner', async () => {
   expect(file.stdout).toContain('Total: 3 tests');
   const directory = await run('run', 'tests', '--list');
   expect(directory.code).toBe(0);
-  expect(directory.stdout).toContain('Total: 16 tests');
+  expect(directory.stdout).toContain('Total: 19 tests');
   expect((await run('run', 'no-such-target', '--list')).code).toBe(1);
 });
 
@@ -80,4 +80,85 @@ test('CLI reports a friendly error for a site without config', async () => {
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+
+async function isolatedWorkspace() {
+  const root = await mkdtemp(fileURLToPath(new URL('../.cli-fixture-', import.meta.url)));
+  await mkdir(join(root, 'src'));
+  for (const file of ['cli.js', 'sites.js']) {
+    await copyFile(fileURLToPath(new URL(`../src/${file}`, import.meta.url)), join(root, 'src', file));
+  }
+  await writeFile(join(root, 'package.json'), '{"type":"module"}');
+  async function invoke(...args: string[]) {
+    try {
+      return { code: 0, ...await exec(process.execPath, [join(root, 'src/cli.js'), ...args]) };
+    } catch (error: any) {
+      return { code: error.code, stdout: error.stdout, stderr: error.stderr };
+    }
+  }
+  return { root, invoke };
+}
+
+test('CLI init scaffolds safely and validates input', async () => {
+  const { root, invoke } = await isolatedWorkspace();
+  try {
+    const result = await invoke('init', 'sample-site', '--url', 'http://127.0.0.1:4567');
+    expect(result.code, result.stderr).toBe(0);
+    const config = join(root, 'sites/sample-site/playwright.config.ts');
+    const original = await readFile(config, 'utf8');
+    expect(original).toContain('process.env.SAMPLE_SITE_URL');
+    expect(original).toContain('http://127.0.0.1:4567/');
+    expect(await readFile(join(root, 'sites/sample-site/routes.spec.ts'), 'utf8')).toContain('home smoke test');
+    expect(await readFile(join(root, 'sites/sample-site/README.md'), 'utf8')).toContain('owner team');
+    expect((await invoke('init', 'sample-site')).code).toBe(2);
+    expect(await readFile(config, 'utf8')).toBe(original);
+    for (const args of [[], ['../escape'], ['bad/name'], ['unsafe', '--url', 'file:///tmp/a'], ['bad', '--unknown']]) {
+      expect((await invoke('init', ...args)).code).toBe(2);
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('CLI batch aggregates success and supports run --all', async () => {
+  const { root, invoke } = await isolatedWorkspace();
+  try {
+    for (const site of ['one', 'two']) {
+      expect((await invoke('init', site)).code).toBe(0);
+      await writeFile(join(root, 'sites', site, 'routes.spec.ts'), `import { test, expect } from '@playwright/test';
+        test('passes', () => expect(1).toBe(1));`);
+    }
+    await mkdir(join(root, 'sites/unconfigured'));
+    for (const args of [['batch'], ['run', '--all']]) {
+      const result = await invoke(...args);
+      expect(result.code, result.stderr).toBe(0);
+      const report = JSON.parse(result.stdout);
+      expect(report.ok).toBe(true);
+      expect(report.summary).toEqual({ totalSites: 2, passedSites: 2, failedSites: 0, totalTests: 2, passedTests: 2, failedTests: 0 });
+      expect(report.sites.map((site: any) => site.site)).toEqual(['one', 'two']);
+      expect(JSON.parse(await readFile(join(root, 'test-results/batch-report.json'), 'utf8'))).toEqual(report);
+    }
+    expect((await invoke('batch', '--unknown')).code).toBe(2);
+    expect((await invoke('run', 'one', '--all')).code).toBe(2);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('CLI batch continues after failures and reports empty discovery', async () => {
+  const { root, invoke } = await isolatedWorkspace();
+  try {
+    const empty = JSON.parse((await invoke('batch')).stdout);
+    expect(empty.summary.totalSites).toBe(0);
+    expect(empty.ok).toBe(true);
+    for (const site of ['a-fails', 'b-passes']) {
+      await invoke('init', site);
+      await writeFile(join(root, 'sites', site, 'routes.spec.ts'), `import { test, expect } from '@playwright/test';
+        test('check', () => expect(1).toBe(${site === 'a-fails' ? 2 : 1}));`);
+    }
+    const result = await invoke('batch');
+    expect(result.code).toBe(1);
+    const report = JSON.parse(result.stdout);
+    expect(report.ok).toBe(false);
+    expect(report.summary).toEqual({ totalSites: 2, passedSites: 1, failedSites: 1, totalTests: 2, passedTests: 1, failedTests: 1 });
+    expect(report.sites[0]).toMatchObject({ site: 'a-fails', ok: false, exitCode: 1 });
+    expect(report.sites[1]).toMatchObject({ site: 'b-passes', ok: true, exitCode: 0 });
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

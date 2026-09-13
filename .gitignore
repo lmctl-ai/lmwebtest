@@ -9,3 +9,4 @@ screenshots/
 *.log
 *.lmctl
 .lmctl/
+.cli-fixture-*/

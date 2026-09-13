@@ -9,7 +9,7 @@
   "scripts": {
     "test": "playwright test",
     "serve": "node server.mjs",
-    "check": "node --check src/cli.js && node --check server.mjs && node --check public/app.js",
+    "check": "node --check src/cli.js && node --check src/sites.js && node --check server.mjs && node --check public/app.js",
     "test:list": "playwright test --list",
     "browsers:install": "playwright install chromium"
   },

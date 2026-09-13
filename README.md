@@ -48,54 +48,43 @@ Verification: `npm run check` checks JavaScript syntax; `npm test` runs browser,
 API, and CLI integration tests. No separate linter or TypeScript compiler is
 configured in this initial version.
 
-## Per-website suites: run after each UI change
+## Util/service model and consumer workspaces
 
-lmwebtest is the standard reusable browser UI testing tool. Keep each website's
-checks centrally in this repository:
-
-```text
-sites/<site-id>/
-  playwright.config.ts
-  routes.spec.ts
-  README.md
-```
-
-Each config defines its live base URL with a site-specific environment override,
-timeouts, browser settings, and a separate `test-results/<site-id>/` output
-folder. Each suite checks its real routes, expected titles, critical visible
-selectors, console/page/request errors, broken images, and full-page screenshots.
-The site's README records prerequisites, route coverage, and the invocation.
+lmwebtest owns the tool, infrastructure, workspace conventions, scaffolding and
+batch runner. Consumer website teams own and author their site's test cases.
+Start with [consumer onboarding](docs/ONBOARDING.md).
 
 ```sh
-# One-time setup in lmwebtest:
-npm link
-# After a site's change is served, from that site's repository:
-lmwebtest run localweb
-LOCALWEB_URL=http://127.0.0.1:4173 lmwebtest run localweb
-# No global registration needed:
-node /home/mma/repos/tools/lmwebtest/src/cli.js run localweb
+lmwebtest init my-site --url http://127.0.0.1:8080
+lmwebtest run my-site
+lmwebtest batch
+lmwebtest run --all
 ```
 
-Run this command after serving each UI change, or add it to the site's existing
-build/watch/CI command after the server is ready. It is a one-shot check; it does
-not start a watcher or the live application. Use the exit code as the change gate:
-0 pass, 1 test/runtime failure, 2 invalid CLI arguments.
+`init` creates config, starter smoke spec and README under `sites/<site-name>/`.
+It refuses to overwrite existing workspaces. Consumers expand their own cases and
+run `lmwebtest run <site>` once their changed application is served. This is a
+one-shot invocation for existing watch/build/CI workflows; targets are not started
+automatically. `sites/localweb` is a reference scaffold with one home smoke test,
+using `LOCALWEB_URL` or `http://127.0.0.1:4173`. Localweb owns its expansion.
 
-`run <site-id>` selects `sites/<site-id>/playwright.config.ts`. With no target,
-`run` uses the default demo `tests/` suite. File/directory targets pass through as
-Playwright test filters relative to the lmwebtest repository, even when invoked
-elsewhere. A named site cannot be combined with `--config`; use an explicit
-config for other suites. Supported runner options: `--config/-c`, `--grep/-g`,
-`--grep-invert`, repeatable `--project`, `--workers`, `--timeout`, `--retries`,
-`--reporter`, `--output`, `--trace`, `--max-failures`, `--repeat-each`, `--shard`,
-`--list`, `--headed`, `--debug`, `--ui`, `--help/-h`, `--forbid-only`,
-`--fully-parallel`, `--update-snapshots`, `--quiet`, `--pass-with-no-tests`.
-Unknown options and malformed numeric arguments are rejected before execution.
-Playwright validates project/config/reporter semantics during execution.
+`batch` and `run --all` run every configured site sequentially and continue after
+failures. Both accept no additional arguments. A JSON report is emitted on stdout
+and saved to `test-results/batch-report.json`, with site outcomes, runner output
+and aggregate test counts. Reports and screenshots are generated artifacts.
+Exit codes: 0 pass, 1 test/runtime failure, 2 invalid arguments. Empty discovery
+succeeds with zero totals. See onboarding for retry/skip accounting.
 
-First adopter: [localweb](sites/localweb/README.md), five live routes at port
-4173, with screenshots under `test-results/localweb/`. lmwebtest owns browser UI
-checks; localwebcli owns CLI/contract integration. Next planned adopter:
-**egtry.com** (suite not yet implemented).
+`run <site-id>` selects `sites/<site-id>/playwright.config.ts`; no target runs the
+root demo suite. File/directory filters remain relative to the lmwebtest repository.
+A named site cannot be combined with `--config`. Supported runner options:
+`--config/-c`, `--grep/-g`, `--grep-invert`, repeatable `--project`, `--workers`,
+`--timeout`, `--retries`, `--reporter`, `--output`, `--trace`, `--max-failures`,
+`--repeat-each`, `--shard`, `--list`, `--headed`, `--debug`, `--ui`, `--help/-h`,
+`--forbid-only`, `--fully-parallel`, `--update-snapshots`, `--quiet`,
+`--pass-with-no-tests`. Unknown options and malformed numbers are rejected;
+Playwright validates config/project/reporter semantics at execution.
 
-See [the durable convention](durable-memory/per-site-convention.md).
+Next planned consumer: egtry.com; its owner team will author its test cases.
+See [service model](durable-memory/service-model.md) and
+[per-site convention](durable-memory/per-site-convention.md).
