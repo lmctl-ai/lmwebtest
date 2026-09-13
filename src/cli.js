@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
-import { mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { mkdir, stat } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
@@ -10,7 +10,7 @@ import { chromium, expect } from '@playwright/test';
 const help = `Usage:
   lmwebtest test <url> [--status 200] [--title "Exact title"] [--selector CSS] [--timeout 10000]
   lmwebtest screenshot <url> --out <file.png> [--no-js] [--timeout 10000]
-  lmwebtest run [Playwright test options]
+  lmwebtest run [site-id|file|dir] [Playwright test options]
 
 Checks HTTP status (default 200), console errors, uncaught page errors, failed
 requests, HTTP resource errors, and broken images observed through page load.
@@ -21,13 +21,57 @@ Outputs JSON; exits 1 on failed checks and 2 on invalid arguments.
 async function main() {
   const [command, ...args] = process.argv.slice(2);
   if (command === 'run') {
+    const root = fileURLToPath(new URL('../', import.meta.url));
+    let runnerArgs = [...args];
+    try {
+      const definitions = {};
+      for (const name of ['config', 'grep', 'grep-invert', 'project', 'workers', 'timeout', 'retries', 'reporter', 'output', 'trace', 'max-failures', 'repeat-each', 'shard']) {
+        definitions[name] = { type: 'string', multiple: name === 'project' };
+      }
+      for (const name of ['list', 'headed', 'debug', 'ui', 'help', 'forbid-only', 'fully-parallel', 'update-snapshots', 'quiet', 'pass-with-no-tests']) {
+        definitions[name] = { type: 'boolean' };
+      }
+      definitions.config.short = 'c';
+      definitions.grep.short = 'g';
+      definitions.help.short = 'h';
+      const { values, positionals, tokens } = parseArgs({ args, options: definitions, allowPositionals: true, tokens: true });
+      for (const name of ['timeout', 'retries', 'max-failures', 'repeat-each']) {
+        if (values[name] !== undefined && (!/^\d+$/.test(values[name]) || Number(values[name]) > 2147483647 || (name === 'repeat-each' && Number(values[name]) === 0))) {
+          throw new Error(`Invalid --${name}`);
+        }
+      }
+      if (values.workers !== undefined && !/^[1-9]\d*%?$/.test(values.workers)) throw new Error('Invalid --workers');
+      if (values.trace !== undefined && !['on', 'off', 'on-first-retry', 'on-all-retries', 'retain-on-failure', 'retain-on-first-failure'].includes(values.trace)) throw new Error('Invalid --trace');
+      if (values.shard !== undefined) {
+        const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(values.shard);
+        if (!match || Number(match[1]) > Number(match[2])) throw new Error('Invalid --shard');
+      }
+      const target = positionals[0];
+      if (target && /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(target)) {
+        const siteDir = join(root, 'sites', target);
+        const site = await stat(siteDir).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+        if (site?.isDirectory()) {
+          if (values.config !== undefined) throw new Error('A site target cannot be combined with --config');
+          const config = join(siteDir, 'playwright.config.ts');
+          const configOk = await stat(config).then(s => s.isFile()).catch(() => false);
+          if (!configOk) throw new Error(`Missing site config: ${config}`);
+          const index = tokens.find(token => token.kind === 'positional').index;
+          runnerArgs.splice(index, 1);
+          runnerArgs.unshift('--config', config);
+        }
+      }
+    } catch (error) {
+      console.error(JSON.stringify({ ok: false, error: error.message }));
+      process.exitCode = 2;
+      return;
+    }
     const require = createRequire(import.meta.url);
-    const child = spawn(process.execPath, [require.resolve('@playwright/test/cli'), 'test', ...args], {
+    const child = spawn(process.execPath, [require.resolve('@playwright/test/cli'), 'test', ...runnerArgs], {
       cwd: fileURLToPath(new URL('../', import.meta.url)), stdio: 'inherit',
     });
     process.exitCode = await new Promise((resolve, reject) => {
       child.once('error', reject);
-      child.once('exit', code => resolve(code ?? 1));
+      child.once('exit', code => resolve(code === 0 ? 0 : 1));
     });
     return;
   }

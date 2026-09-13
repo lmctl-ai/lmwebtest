@@ -26,7 +26,7 @@
    - Captures full-page headless screenshots.
    - Supports disabling JavaScript execution (`--no-js`) for testing static and server-side rendered previews.
 
-3. **`lmwebtest run [playwright options]`**
+3. **`lmwebtest run [site-id|file|dir] [options]`**
    - Delegates safely to the bundled Playwright test runner (`@playwright/test/cli`) without shell interpolation.
 
 ## Architecture & Codebase Layout
@@ -47,3 +47,10 @@
 - **Git Policy**:
   - `durable-memory/` is committed and maintained across tasks.
   - `*.lmctl` and `.lmctl/` are ignored to prevent leaking machine-specific provider session tokens/IDs.
+
+## Standard per-site workflow
+
+- [Per-site convention](per-site-convention.md): central `sites/<site-id>/` configs, specs, and README; teams run `lmwebtest run <site-id>` after serving UI changes.
+- First adopter: `sites/localweb`, five live routes using `LOCALWEB_URL` or port 4173.
+- Browser UI checks belong to lmwebtest; CLI/contract integration belongs to localwebcli.
+- Next planned adopter: egtry.com (not implemented yet).
