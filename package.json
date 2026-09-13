@@ -1,0 +1,23 @@
+{
+  "name": "lmwebtest",
+  "version": "0.1.0",
+  "description": "Lightweight Playwright web page checks and screenshots",
+  "type": "module",
+  "bin": {
+    "lmwebtest": "src/cli.js"
+  },
+  "scripts": {
+    "test": "playwright test",
+    "serve": "node server.mjs",
+    "check": "node --check src/cli.js && node --check server.mjs && node --check public/app.js",
+    "test:list": "playwright test --list",
+    "browsers:install": "playwright install chromium"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.59.1",
+    "express": "^5.2.1"
+  }
+}

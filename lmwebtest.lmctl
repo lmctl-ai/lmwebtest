@@ -1,0 +1,10 @@
+#teamfile: /home/mma/repos/tools/lmwebtest/lmwebtest.lmctl
+# lmwebtest
+
+
+_MEMBER_ alias=Lead provider=agy model="Gemini 3.8 Flash (Medium)" sessionid=1695410f-0429-4296-9a01-64dd49f1af7d sessiondir=/home/mma/repos/tools/lmwebtest
+
+# members
+_MEMBER_ alias=Coder provider=codex model="gpt-6-astra" sessionid=01a09b39-8840-7500-8ce4-e4c2774eeccc sessiondir=/home/mma/repos/tools/lmwebtest
+
+_MEMBER_ alias=Reviewer provider=claude  model="claude-sonnet-5" sessionid=abb41fde-4889-406a-94b0-018d1d721e9f sessiondir=/home/mma/repos/tools/lmwebtest
