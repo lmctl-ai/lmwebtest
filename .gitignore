@@ -7,3 +7,5 @@ docroot/
 screenshots/
 .omx/
 *.log
+*.lmctl
+.lmctl/
