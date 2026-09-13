@@ -24,3 +24,14 @@ additional cases; the former five-route suite is no longer the active contract.
 Browser cases live here; localwebcli owns CLI/contract integration.
 Next planned consumer: egtry.com, with test authorship assigned to its owner team.
 See service-model.md and ../docs/ONBOARDING.md.
+
+## Test-owner team composition
+
+Each consumer must stand up an **agy/agy/codex** test-owner team:
+Lead = `agy` (Gemini 3.8 Flash), Coder = `agy` (Gemini 3.8 Flash),
+Reviewer = `codex` (independent cross-reviewer). Affordable Gemini bulk case
+authoring is paired with independent cross-provider Codex review; author !=
+reviewer. Create the central workspace, author cases, and run batch on change.
+The service owns the infrastructure; this recipe governs consumer teams.
+The onboarding guide and generated site README include a starter `.lmctl`
+teamfile with `model="Gemini 3.8 Flash (Medium)"` for both agy members.

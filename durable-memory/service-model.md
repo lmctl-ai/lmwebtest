@@ -19,3 +19,14 @@ isolated workspaces, so the tool's own verification does not require consumer
 applications. Batch runs configured consumer sites and preserves per-site outcome
 and output in test-results/batch-report.json, continuing after failures.
 See ../docs/ONBOARDING.md for consumer instructions.
+
+## Test-owner team composition
+
+Each consumer must stand up an **agy/agy/codex** test-owner team:
+Lead = `agy` (Gemini 3.8 Flash), Coder = `agy` (Gemini 3.8 Flash),
+Reviewer = `codex` (independent cross-reviewer). Affordable Gemini bulk case
+authoring is paired with independent cross-provider Codex review; author !=
+reviewer. Create the central workspace, author cases, and run batch on change.
+The service owns the infrastructure; this recipe governs consumer teams.
+The onboarding guide and generated site README include a starter `.lmctl`
+teamfile with `model="Gemini 3.8 Flash (Medium)"` for both agy members.

@@ -21,3 +21,14 @@ integration. Next planned consumer: egtry.com, whose team will author its cases.
 Batch reports: test-results/batch-report.json with ISO timestamp, aggregate site
 and test counts, per-site exit codes and output. Generated artifacts and local
 *.lmctl/.lmctl provider metadata remain ignored; durable-memory is maintained.
+
+## Test-owner team composition
+
+Each consumer must stand up an **agy/agy/codex** test-owner team:
+Lead = `agy` (Gemini 3.8 Flash), Coder = `agy` (Gemini 3.8 Flash),
+Reviewer = `codex` (independent cross-reviewer). Affordable Gemini bulk case
+authoring is paired with independent cross-provider Codex review; author !=
+reviewer. Create the central workspace, author cases, and run batch on change.
+The service owns the infrastructure; this recipe governs consumer teams.
+The onboarding guide and generated site README include a starter `.lmctl`
+teamfile with `model="Gemini 3.8 Flash (Medium)"` for both agy members.

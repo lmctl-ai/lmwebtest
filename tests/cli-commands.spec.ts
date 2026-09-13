@@ -110,7 +110,14 @@ test('CLI init scaffolds safely and validates input', async () => {
     expect(original).toContain('process.env.SAMPLE_SITE_URL');
     expect(original).toContain('http://127.0.0.1:4567/');
     expect(await readFile(join(root, 'sites/sample-site/routes.spec.ts'), 'utf8')).toContain('home smoke test');
-    expect(await readFile(join(root, 'sites/sample-site/README.md'), 'utf8')).toContain('owner team');
+    const readme = await readFile(join(root, 'sites/sample-site/README.md'), 'utf8');
+    expect(readme).toContain('owner team');
+    expect(readme).toContain('sample-site-tests.lmctl');
+    expect(readme).toContain('_MEMBER_ alias=Lead provider=agy model="Gemini 3.8 Flash (Medium)"');
+    expect(readme).toContain('_MEMBER_ alias=Coder provider=agy model="Gemini 3.8 Flash (Medium)"');
+    expect(readme).toContain('_MEMBER_ alias=Reviewer provider=codex');
+    expect(readme).toContain('author must not review their own');
+    expect(readme).toContain('batch on change');
     expect((await invoke('init', 'sample-site')).code).toBe(2);
     expect(await readFile(config, 'utf8')).toBe(original);
     for (const args of [[], ['../escape'], ['bad/name'], ['unsafe', '--url', 'file:///tmp/a'], ['bad', '--unknown']]) {
