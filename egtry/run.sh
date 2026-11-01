@@ -7,6 +7,23 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 
 # -----------------------------------------------------------------------------
+# 0. Handle help / usage
+# -----------------------------------------------------------------------------
+for arg in "$@"; do
+  if [ "$arg" = "--help" ] || [ "$arg" = "-h" ]; then
+    echo "Usage: ./run.sh [--book <name>] [--host <host>] [--v1-host <host>] [--url-map <path>]"
+    echo ""
+    echo "Options:"
+    echo "  --book <name>      Book slug to test (default: python, e.g. c, javascript, python)"
+    echo "  --host <host>      Production host (default: www.egtry.com)"
+    echo "  --v1-host <host>   Legacy host for tracks comparison (default: v1.egtry.com)"
+    echo "  --url-map <path>   Path to url-map.json"
+    echo "  --help, -h         Show this help message and exit"
+    exit 0
+  fi
+done
+
+# -----------------------------------------------------------------------------
 # 1. Check prerequisites
 # -----------------------------------------------------------------------------
 if ! command -v node >/dev/null 2>&1; then
@@ -130,4 +147,4 @@ echo "=== Prerequisites ready (LMHTML=$LMHTML) ==="
 echo "=== Running egtry integration test ($*) ==="
 
 cd "$HERE"
-lmscript egtry.lms "$@"
+flock /tmp/egtry-suite.lock lmscript egtry.lms "$@"

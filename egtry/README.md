@@ -10,9 +10,11 @@ Reusable `lmscript` + `lmhtml` integration test suite for verifying `egtry.com` 
 
 # Explicit book and host
 ./run.sh --book python --host www.egtry.com
+./run.sh --book c --host www.egtry.com
+./run.sh --book javascript --host www.egtry.com
 
 # Optional flags
-./run.sh --book python --host www.egtry.com \
+./run.sh --book c --host www.egtry.com \
   --v1-host v1.egtry.com \
   --url-map /home/ubuntu/repos/lmctlhq/interp-docs/docs/design/simple-viewer/poc/v7/url-map.json
 ```
