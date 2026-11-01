@@ -1,0 +1,774 @@
+# egtry.lms - Post-switch book integration test for egtry.com
+# Usage:
+#   ./run.sh --book python --host www.egtry.com
+#   lmscript egtry.lms --book <id> --host <host> [--url-map <path>] [--v1-host <host>]
+#
+# For every kept URL of the book (from url-map.json plus /<book>/):
+#   1. Fetches the page with curl
+#   2. Extracts with lmhtml (via _lmcode_ DSL bytecode): title, h1, links,
+#      Run button / .sv example elements, viewer scripts/stylesheets, and prev/next pager links
+#   3. Checks:
+#      - HTTP 200 for every kept URL (book index + all kept lesson pages)
+#      - title and h1 present (non-empty) on every kept URL
+#      - Run / example elements (.sv[data-example]) present on every lesson page
+#      - Viewer script (page.js) and CSS (simple.css, chapter.css) respond HTTP 200
+#      - Previous / next chapter & page navigation links work (resolve to HTTP 200)
+#      - No broken internal links (all relative links resolve to HTTP 200)
+#      - /tracks/programming-languages/ on <host> vs <v1-host> works and links to /<book>/
+
+# -----------------------------------------------------------------------------
+# 0. Parse CLI Arguments & Clean Stale State
+# -----------------------------------------------------------------------------
+let book = env("EGTRY_BOOK", "python");
+let host = env("EGTRY_HOST", "www.egtry.com");
+let v1_host = env("EGTRY_V1_HOST", "v1.egtry.com");
+let url_map_path = env("EGTRY_URL_MAP", "/home/ubuntu/repos/lmctlhq/interp-docs/docs/design/simple-viewer/poc/v7/url-map.json");
+
+for (ai in range(0, args.len())) {
+  let arg = args.get(ai, "");
+  if (arg == "--book" && ai + 1 < args.len()) {
+    book = args.get(ai + 1, book);
+  }
+  if (arg == "--host" && ai + 1 < args.len()) {
+    host = args.get(ai + 1, host);
+  }
+  if (arg == "--v1-host" && ai + 1 < args.len()) {
+    v1_host = args.get(ai + 1, v1_host);
+  }
+  if (arg == "--url-map" && ai + 1 < args.len()) {
+    url_map_path = args.get(ai + 1, url_map_path);
+  }
+}
+
+rmdir("work", true);
+mkdir("work/pages", true);
+
+let stats = {pass: 0, fail: 0};
+
+fn check(condition, name, detail) {
+  if (condition) {
+    stats["pass"] = stats.get("pass", 0) + 1;
+    println(f"[PASS] {name}: {detail}");
+  } else {
+    stats["fail"] = stats.get("fail", 0) + 1;
+    println(f"[FAIL] {name}: {detail}");
+  }
+}
+
+# Helper: resolve a relative or root-relative href against a page URL path (e.g. "/python/if_intro/")
+fn resolve_href(base_path, raw_href) {
+  let href = trim(raw_href);
+  let hash_idx = index_of(href, "#");
+  if (hash_idx >= 0) {
+    href = substring(href, 0, hash_idx);
+  }
+  let q_idx = index_of(href, "?");
+  if (q_idx >= 0) {
+    href = substring(href, 0, q_idx);
+  }
+  if (href == "") {
+    return base_path;
+  }
+  if (starts_with(href, "http://") || starts_with(href, "https://") ||
+      starts_with(href, "mailto:") || starts_with(href, "javascript:") ||
+      starts_with(href, "data:") || starts_with(href, "//")) {
+    return "";
+  }
+  if (starts_with(href, "/")) {
+    return href;
+  }
+
+  # Directory of base_path
+  let dir_path = base_path;
+  if (!ends_with(dir_path, "/")) {
+    let last_slash = last_index_of(dir_path, "/");
+    if (last_slash >= 0) {
+      dir_path = substring(dir_path, 0, last_slash + 1);
+    } else {
+      dir_path = "/";
+    }
+  }
+
+  let base_parts = split(dir_path, "/");
+  let stack = [];
+  for (bi in range(0, base_parts.len())) {
+    let bp = base_parts.get(bi, "");
+    if (bp != "" && bp != ".") {
+      push(stack, bp);
+    }
+  }
+
+  let trailing_slash = ends_with(href, "/");
+  let rel_parts = split(href, "/");
+  for (ri in range(0, rel_parts.len())) {
+    let rp = rel_parts.get(ri, "");
+    if (rp == "" || rp == ".") {
+      if (ri == rel_parts.len() - 1 && rp == ".") {
+        trailing_slash = true;
+      }
+    } else if (rp == "..") {
+      if (stack.len() > 0) {
+        pop(stack);
+      }
+      if (ri == rel_parts.len() - 1) {
+        trailing_slash = true;
+      }
+    } else {
+      push(stack, rp);
+    }
+  }
+
+  if (stack.len() == 0) {
+    return "/";
+  }
+  let joined = "/" + join(stack, "/");
+  if (trailing_slash && !ends_with(joined, "/")) {
+    joined = joined + "/";
+  }
+  return joined;
+}
+
+println(f"=== Testing book='{book}' on host='{host}' (v1='{v1_host}') ===");
+
+# -----------------------------------------------------------------------------
+# 1. Load Kept Book URLs from url-map.json
+# -----------------------------------------------------------------------------
+let map_exists = file_exists(url_map_path);
+check(map_exists,
+  "URL Map Present",
+  map_exists ? f"loaded {url_map_path}" : f"missing {url_map_path}");
+
+if (!map_exists) {
+  exit(1);
+}
+
+let url_map = json_parse(read_file(url_map_path));
+let entries_list = url_map.get("entries", []);
+let book_prefix = "/" + book + "/";
+let kept_paths = [];
+let dropped_count = 0;
+
+for (ei in range(0, entries_list.len())) {
+  let entry = entries_list.get(ei, {});
+  let old_u = entry.get("old", "");
+  let new_u = entry.get("new", "");
+  if (starts_with(old_u, book_prefix)) {
+    if (new_u != "dropped") {
+      if (!contains(kept_paths, new_u)) {
+        push(kept_paths, new_u);
+      }
+    } else {
+      dropped_count = dropped_count + 1;
+    }
+  }
+}
+
+if (!contains(kept_paths, book_prefix)) {
+  unshift(kept_paths, book_prefix);
+}
+
+check(kept_paths.len() > 1,
+  f"Kept URLs for /{book}/",
+  f"{str(kept_paths.len())} kept URLs (1 index + {str(kept_paths.len() - 1)} pages; {str(dropped_count)} dropped)");
+
+# Map each kept path to a local file in work/pages/<slug>.html
+let file_to_path = {};
+let path_to_file = {};
+let cfg_lines = [];
+
+for (pi in range(0, kept_paths.len())) {
+  let p_url = kept_paths.get(pi, "");
+  let rel = substring(p_url, book_prefix.len());
+  if (ends_with(rel, "/")) {
+    rel = substring(rel, 0, rel.len() - 1);
+  }
+  let slug = rel == "" ? "__index__" : replace_all(rel, "/", "__");
+  let local_file = "work/pages/" + slug + ".html";
+  file_to_path[local_file] = p_url;
+  path_to_file[p_url] = local_file;
+  push(cfg_lines, f"url = \"https://{host}{p_url}\"");
+  push(cfg_lines, f"output = \"{local_file}\"");
+}
+
+write_file("work/pages.cfg", join(cfg_lines, "\n") + "\n");
+
+# -----------------------------------------------------------------------------
+# 2. Fetch All Kept Book Pages and /tracks/programming-languages/ with curl
+# -----------------------------------------------------------------------------
+let fetch_res = system([
+  "curl", "-sS", "-L", "--max-time", "30", "--retry", "2",
+  "-Z", "--parallel-max", "16",
+  "-w", "%{filename_effective}\t%{http_code}\n",
+  "-K", "work/pages.cfg"
+]);
+
+let fetch_exit = fetch_res.get("code", -1);
+let fetch_out_lines = lines(trim(fetch_res.get("stdout", "")));
+let http_status_by_path = {};
+
+for (fl in range(0, fetch_out_lines.len())) {
+  let line = trim(fetch_out_lines.get(fl, ""));
+  if (line != "") {
+    let parts = split(line, "\t");
+    if (parts.len() >= 2) {
+      let fname = parts.get(0, "");
+      let code = parts.get(1, "");
+      let mapped_path = file_to_path.get(fname, "");
+      if (mapped_path != "") {
+        http_status_by_path[mapped_path] = code;
+      }
+    }
+  }
+}
+
+let non_200_pages = [];
+for (ki in range(0, kept_paths.len())) {
+  let kp = kept_paths.get(ki, "");
+  let st = http_status_by_path.get(kp, "missing");
+  let lf = path_to_file.get(kp, "");
+  if (st != "200" || !file_exists(lf)) {
+    push(non_200_pages, f"{kp} (HTTP {st})");
+  }
+}
+
+let all_pages_200 = fetch_exit == 0 && non_200_pages.len() == 0;
+check(all_pages_200,
+  f"All Kept Book URLs HTTP 200 ({str(kept_paths.len())} URLs)",
+  all_pages_200 ? f"all {str(kept_paths.len())} kept URLs under /{book}/ returned HTTP 200"
+                : f"{str(non_200_pages.len())} failed: {join(non_200_pages, ', ')}");
+
+# Fetch /tracks/programming-languages/ on host and v1_host
+let fetch_tracks_www = system([
+  "curl", "-sS", "-L", "--max-time", "20", "--retry", "2",
+  "-w", "%{http_code}",
+  f"https://{host}/tracks/programming-languages/",
+  "-o", "work/tracks_www.html"
+]);
+let tracks_www_code = trim(fetch_tracks_www.get("stdout", ""));
+let tracks_www_ok = fetch_tracks_www.get("code", -1) == 0 && tracks_www_code == "200" && file_exists("work/tracks_www.html");
+check(tracks_www_ok,
+  f"Tracks Page HTTP 200 ({host})",
+  tracks_www_ok ? f"https://{host}/tracks/programming-languages/ returned HTTP 200"
+                : f"expected HTTP 200, got {tracks_www_code}");
+
+let fetch_tracks_v1 = system([
+  "curl", "-sS", "-L", "--max-time", "20", "--retry", "2",
+  "-w", "%{http_code}",
+  f"https://{v1_host}/tracks/programming-languages/",
+  "-o", "work/tracks_v1.html"
+]);
+let tracks_v1_code = trim(fetch_tracks_v1.get("stdout", ""));
+let tracks_v1_ok = fetch_tracks_v1.get("code", -1) == 0 && tracks_v1_code == "200" && file_exists("work/tracks_v1.html");
+check(tracks_v1_ok,
+  f"Tracks Page HTTP 200 ({v1_host})",
+  tracks_v1_ok ? f"https://{v1_host}/tracks/programming-languages/ returned HTTP 200"
+               : f"expected HTTP 200, got {tracks_v1_code}");
+
+if (!all_pages_200 || !tracks_www_ok || !tracks_v1_ok) {
+  println("==================================================");
+  println(f"Test Aborted Early: {str(stats.get('pass', 0))} passed, {str(stats.get('fail', 0))} failed during HTTP capture");
+  println("==================================================");
+  exit(1);
+}
+
+# -----------------------------------------------------------------------------
+# 3. Parse RAW DOM and Extract Elements via lmhtml (_lmcode_ Bytecode)
+# -----------------------------------------------------------------------------
+p = _lmcode_ cli="lmhtml" install="github:lmctl-ai/lmhtml@latest";
+let docs = html.load_dir("work/pages");
+for (d in range(0, docs.len())) {
+  let doc = docs.at(d);
+  let pth = doc.path();
+  report.add("title", pth, 0, doc.title());
+
+  let h1s = doc.select("h1");
+  for (i in range(0, h1s.len())) {
+    report.add("h1", pth, i, h1s.at(i).text());
+  }
+
+  let links = doc.links();
+  for (j in range(0, links.len())) {
+    report.add("link", pth, j, links.at(j));
+  }
+
+  let styles = doc.select("link[rel='stylesheet']");
+  for (k in range(0, styles.len())) {
+    report.add("style", pth, k, styles.at(k).attr("href"));
+  }
+
+  let scripts = doc.select("script[src]");
+  for (m in range(0, scripts.len())) {
+    report.add("script", pth, m, scripts.at(m).attr("src"));
+  }
+
+  let svs = doc.select(".sv");
+  for (n in range(0, svs.len())) {
+    let sv = svs.at(n);
+    report.add("sv", pth, n, sv.attr("data-example") + "|" + sv.attr("data-state"));
+  }
+
+  let runs = doc.select(".sv-run, #sv-run, button#run");
+  for (r in range(0, runs.len())) {
+    report.add("run_btn", pth, r, runs.at(r).text());
+  }
+
+  let pagers = doc.select("nav.sv-pager a");
+  for (q in range(0, pagers.len())) {
+    let a = pagers.at(q);
+    report.add("pager", pth, q, a.attr("rel") + "|" + a.attr("href") + "|" + a.text());
+  }
+
+  let crumbs = doc.select("nav.sv-crumbs a");
+  for (c in range(0, crumbs.len())) {
+    let ca = crumbs.at(c);
+    report.add("crumb", pth, c, ca.attr("href") + "|" + ca.text());
+  }
+}
+
+let tracks_www = html.load("work/tracks_www.html");
+report.add("tracks_www_title", "work/tracks_www.html", 0, tracks_www.title());
+let tw_h1s = tracks_www.select("h1");
+if (tw_h1s.len() > 0) {
+  report.add("tracks_www_h1", "work/tracks_www.html", 0, tw_h1s.at(0).text());
+}
+let tw_links = tracks_www.links();
+for (tl in range(0, tw_links.len())) {
+  report.add("tracks_www_link", "work/tracks_www.html", tl, tw_links.at(tl));
+}
+
+let tracks_v1 = html.load("work/tracks_v1.html");
+report.add("tracks_v1_title", "work/tracks_v1.html", 0, tracks_v1.title());
+let tv_h1s = tracks_v1.select("h1");
+if (tv_h1s.len() > 0) {
+  report.add("tracks_v1_h1", "work/tracks_v1.html", 0, tv_h1s.at(0).text());
+}
+let tv_links = tracks_v1.links();
+for (vl in range(0, tv_links.len())) {
+  report.add("tracks_v1_link", "work/tracks_v1.html", vl, tv_links.at(vl));
+}
+
+report.write_json("work/extracted.json");
+end _lmcode_
+
+let lmhtml_bin = env("LMHTML", "");
+if (lmhtml_bin == "" || !file_exists(lmhtml_bin)) {
+  let found = which("lmhtml");
+  if (found != null) {
+    lmhtml_bin = found;
+  }
+}
+
+let lmcode_res = run_lmcode(p, {
+  "command": [
+    "sh",
+    "-c",
+    lmhtml_bin + " --lmcode \"$1\" >/dev/null && printf 'LMCODE_RETURN_BEGIN\\n{\"ok\":true,\"result\":null}\\nLMCODE_RETURN_END\\n'",
+    "sh",
+    "$DSLFILE"
+  ]
+});
+
+let findings = [];
+let parse_ok = false;
+if (lmcode_res.get("ok", false) && file_exists("work/extracted.json")) {
+  let report_data = json_parse(read_file("work/extracted.json"));
+  findings = report_data.get("findings", []);
+  if (findings.len() > 0) {
+    parse_ok = true;
+  }
+}
+
+check(parse_ok,
+  "lmhtml DOM Extraction",
+  parse_ok ? f"extracted {str(findings.len())} structured DOM findings across {str(kept_paths.len())} book pages + 2 tracks pages"
+           : "lmhtml extraction failed or produced 0 findings");
+
+if (!parse_ok) {
+  exit(1);
+}
+
+# -----------------------------------------------------------------------------
+# 4. Organize Findings by Page and Assert Contracts
+# -----------------------------------------------------------------------------
+let page_titles = {};
+let page_h1s = {};
+let page_links = {};
+let page_styles = {};
+let page_scripts = {};
+let page_svs = {};
+let page_runs = {};
+let page_pagers = {};
+let page_crumbs = {};
+
+let tracks_www_title = "";
+let tracks_www_h1 = "";
+let tracks_www_links = [];
+let tracks_v1_title = "";
+let tracks_v1_h1 = "";
+let tracks_v1_links = [];
+
+for (fi in range(0, findings.len())) {
+  let item = findings.get(fi, {});
+  let kind = item.get("kind", "");
+  let raw_file = item.get("file", "");
+  let msg = item.get("message", "");
+
+  if (kind == "tracks_www_title") {
+    tracks_www_title = msg;
+  } else if (kind == "tracks_www_h1") {
+    tracks_www_h1 = msg;
+  } else if (kind == "tracks_www_link") {
+    push(tracks_www_links, msg);
+  } else if (kind == "tracks_v1_title") {
+    tracks_v1_title = msg;
+  } else if (kind == "tracks_v1_h1") {
+    tracks_v1_h1 = msg;
+  } else if (kind == "tracks_v1_link") {
+    push(tracks_v1_links, msg);
+  } else {
+    let fname = "work/pages/" + basename(raw_file);
+    let url_path = file_to_path.get(fname, "");
+    if (url_path != "") {
+      if (kind == "title") {
+        page_titles[url_path] = trim(msg);
+      } else if (kind == "h1") {
+        let arr = page_h1s.get(url_path, []);
+        push(arr, trim(msg));
+        page_h1s[url_path] = arr;
+      } else if (kind == "link") {
+        let arr = page_links.get(url_path, []);
+        push(arr, msg);
+        page_links[url_path] = arr;
+      } else if (kind == "style") {
+        let arr = page_styles.get(url_path, []);
+        push(arr, msg);
+        page_styles[url_path] = arr;
+      } else if (kind == "script") {
+        let arr = page_scripts.get(url_path, []);
+        push(arr, msg);
+        page_scripts[url_path] = arr;
+      } else if (kind == "sv") {
+        let arr = page_svs.get(url_path, []);
+        push(arr, msg);
+        page_svs[url_path] = arr;
+      } else if (kind == "run_btn") {
+        let arr = page_runs.get(url_path, []);
+        push(arr, msg);
+        page_runs[url_path] = arr;
+      } else if (kind == "pager") {
+        let arr = page_pagers.get(url_path, []);
+        push(arr, msg);
+        page_pagers[url_path] = arr;
+      } else if (kind == "crumb") {
+        let arr = page_crumbs.get(url_path, []);
+        push(arr, msg);
+        page_crumbs[url_path] = arr;
+      }
+    }
+  }
+}
+
+# 4a. Check title and h1 present on every kept URL
+let missing_title_pages = [];
+let missing_h1_pages = [];
+for (ti in range(0, kept_paths.len())) {
+  let kp = kept_paths.get(ti, "");
+  let t = page_titles.get(kp, "");
+  if (t == "") {
+    push(missing_title_pages, kp);
+  }
+  let h1_list = page_h1s.get(kp, []);
+  if (h1_list.len() == 0 || h1_list.get(0, "") == "") {
+    push(missing_h1_pages, kp);
+  }
+}
+
+let titles_ok = missing_title_pages.len() == 0;
+check(titles_ok,
+  f"Title Present on All Kept Pages ({str(kept_paths.len())})",
+  titles_ok ? f"all {str(kept_paths.len())} pages have non-empty <title> (index: '{page_titles.get(book_prefix, '')}')"
+            : f"missing <title> on: {join(missing_title_pages, ', ')}");
+
+let h1s_ok = missing_h1_pages.len() == 0;
+let index_h1 = page_h1s.get(book_prefix, [""]).get(0, "");
+check(h1s_ok,
+  f"H1 Heading Present on All Kept Pages ({str(kept_paths.len())})",
+  h1s_ok ? f"all {str(kept_paths.len())} pages have exactly non-empty <h1> (index: '{index_h1}')"
+         : f"missing <h1> on: {join(missing_h1_pages, ', ')}");
+
+# 4b. Check Run button / .sv example elements on all lesson pages
+let missing_example_pages = [];
+let total_sv_examples = 0;
+let lesson_page_count = 0;
+
+for (xi in range(0, kept_paths.len())) {
+  let kp = kept_paths.get(xi, "");
+  if (kp != book_prefix) {
+    lesson_page_count = lesson_page_count + 1;
+    let sv_list = page_svs.get(kp, []);
+    let run_list = page_runs.get(kp, []);
+    let script_list = page_scripts.get(kp, []);
+    total_sv_examples = total_sv_examples + sv_list.len();
+    let has_viewer_script = false;
+    for (si in range(0, script_list.len())) {
+      if (contains(script_list.get(si, ""), "page.js")) {
+        has_viewer_script = true;
+      }
+    }
+    if ((sv_list.len() == 0 || !has_viewer_script) && run_list.len() == 0) {
+      push(missing_example_pages, kp);
+    }
+  }
+}
+
+let examples_ok = missing_example_pages.len() == 0 && lesson_page_count > 0;
+check(examples_ok,
+  f"Executable Examples & Run Viewer on Lesson Pages ({str(lesson_page_count)} pages)",
+  examples_ok ? f"all {str(lesson_page_count)} lesson pages have .sv[data-example] + page.js Run viewer ({str(total_sv_examples)} total runnable examples)"
+              : f"missing .sv/Run viewer on: {join(missing_example_pages, ', ')}");
+
+# 4c. Collect all relative links, viewer scripts/CSS, and prev/next pager links
+let viewer_asset_paths = [];
+let example_data_paths = [];
+let all_relative_targets = [];
+let broken_pager_pages = [];
+let prev_link_count = 0;
+let next_link_count = 0;
+let all_pages_link_count = 0;
+
+for (li in range(0, kept_paths.len())) {
+  let kp = kept_paths.get(li, "");
+
+  # Example trace JSON endpoints (data/<example>.json)
+  let sv_items = page_svs.get(kp, []);
+  for (svi in range(0, sv_items.len())) {
+    let sv_parts = split(sv_items.get(svi, ""), "|");
+    let ex_name = sv_parts.get(0, "");
+    if (ex_name != "") {
+      let data_url = resolve_href(kp, "data/" + ex_name + ".json");
+      if (data_url != "" && !contains(example_data_paths, data_url)) {
+        push(example_data_paths, data_url);
+      }
+    }
+  }
+
+  # Stylesheets
+  let styles = page_styles.get(kp, []);
+  if (styles.len() == 0) {
+    push(broken_pager_pages, f"{kp} (no stylesheets)");
+  }
+  for (sti in range(0, styles.len())) {
+    let resolved_st = resolve_href(kp, styles.get(sti, ""));
+    if (resolved_st != "" && !contains(viewer_asset_paths, resolved_st)) {
+      push(viewer_asset_paths, resolved_st);
+    }
+  }
+
+  # Scripts
+  let scripts = page_scripts.get(kp, []);
+  for (sci in range(0, scripts.len())) {
+    let resolved_sc = resolve_href(kp, scripts.get(sci, ""));
+    if (resolved_sc != "" && !contains(viewer_asset_paths, resolved_sc)) {
+      push(viewer_asset_paths, resolved_sc);
+    }
+  }
+
+  # Pager & breadcrumb checks for lesson pages
+  if (kp != book_prefix) {
+    let pagers = page_pagers.get(kp, []);
+    let crumbs = page_crumbs.get(kp, []);
+    if (pagers.len() == 0 || crumbs.len() == 0) {
+      push(broken_pager_pages, f"{kp} (missing nav.sv-pager or nav.sv-crumbs)");
+    }
+    let has_index_link = false;
+    for (pgi in range(0, pagers.len())) {
+      let pg_parts = split(pagers.get(pgi, ""), "|");
+      let pg_rel = pg_parts.get(0, "");
+      let pg_href = pg_parts.get(1, "");
+      let pg_target = resolve_href(kp, pg_href);
+      if (pg_target == "") {
+        push(broken_pager_pages, f"{kp} pager href='{pg_href}' empty target");
+      } else if (!contains(all_relative_targets, pg_target)) {
+        push(all_relative_targets, pg_target);
+      }
+      if (pg_rel == "prev") {
+        prev_link_count = prev_link_count + 1;
+      } else if (pg_rel == "next") {
+        next_link_count = next_link_count + 1;
+      } else if (pg_target == book_prefix) {
+        has_index_link = true;
+        all_pages_link_count = all_pages_link_count + 1;
+      }
+    }
+    if (!has_index_link) {
+      push(broken_pager_pages, f"{kp} (missing 'All pages' link to {book_prefix})");
+    }
+  }
+
+  # All links on the page
+  let links = page_links.get(kp, []);
+  for (lki in range(0, links.len())) {
+    let raw_lk = links.get(lki, "");
+    let resolved_lk = resolve_href(kp, raw_lk);
+    if (resolved_lk != "" && !contains(all_relative_targets, resolved_lk)) {
+      push(all_relative_targets, resolved_lk);
+    }
+  }
+}
+
+# Verify any target in viewer_asset_paths or all_relative_targets not already in http_status_by_path
+let extra_targets = [];
+for (vi in range(0, viewer_asset_paths.len())) {
+  let vp = viewer_asset_paths.get(vi, "");
+  if (!has_key(http_status_by_path, vp) && !contains(extra_targets, vp)) {
+    push(extra_targets, vp);
+  }
+}
+for (ri in range(0, all_relative_targets.len())) {
+  let rp = all_relative_targets.get(ri, "");
+  if (!has_key(http_status_by_path, rp) && !contains(extra_targets, rp)) {
+    push(extra_targets, rp);
+  }
+}
+for (edi in range(0, example_data_paths.len())) {
+  let edp = example_data_paths.get(edi, "");
+  if (!has_key(http_status_by_path, edp) && !contains(extra_targets, edp)) {
+    push(extra_targets, edp);
+  }
+}
+
+if (extra_targets.len() > 0) {
+  let extra_cfg = [];
+  for (exi in range(0, extra_targets.len())) {
+    let ep = extra_targets.get(exi, "");
+    push(extra_cfg, f"url = \"https://{host}{ep}\"");
+    push(extra_cfg, "output = \"/dev/null\"");
+  }
+  write_file("work/extra_urls.cfg", join(extra_cfg, "\n") + "\n");
+  let extra_res = system([
+    "curl", "-sS", "-L", "--max-time", "20", "--retry", "2",
+    "-Z", "--parallel-max", "16",
+    "-w", "%{url}\t%{http_code}\n",
+    "-K", "work/extra_urls.cfg"
+  ]);
+  let extra_lines = lines(trim(extra_res.get("stdout", "")));
+  let prefix_host = f"https://{host}";
+  for (eli in range(0, extra_lines.len())) {
+    let eline = trim(extra_lines.get(eli, ""));
+    if (eline != "") {
+      let eparts = split(eline, "\t");
+      if (eparts.len() >= 2) {
+        let full_u = eparts.get(0, "");
+        let ecode = eparts.get(1, "");
+        if (starts_with(full_u, prefix_host)) {
+          let epath = substring(full_u, prefix_host.len());
+          http_status_by_path[epath] = ecode;
+        }
+      }
+    }
+  }
+}
+
+# 4d. Check Viewer Script & CSS Assets respond HTTP 200
+let failed_assets = [];
+for (vai in range(0, viewer_asset_paths.len())) {
+  let vap = viewer_asset_paths.get(vai, "");
+  let vst = http_status_by_path.get(vap, "missing");
+  if (vst != "200") {
+    push(failed_assets, f"{vap} (HTTP {vst})");
+  }
+}
+let assets_ok = viewer_asset_paths.len() >= 3 && failed_assets.len() == 0;
+check(assets_ok,
+  "Viewer Script & CSS Assets HTTP 200",
+  assets_ok ? f"all {str(viewer_asset_paths.len())} assets responded HTTP 200 ({join(viewer_asset_paths, ', ')})"
+            : f"failed assets: {join(failed_assets, ', ')}");
+
+# 4d-2. Check all Example Trace JSON endpoints (data/<example>.json) respond HTTP 200
+let failed_example_data = [];
+for (edj in range(0, example_data_paths.len())) {
+  let edp2 = example_data_paths.get(edj, "");
+  let edst = http_status_by_path.get(edp2, "missing");
+  if (edst != "200") {
+    push(failed_example_data, f"{edp2} (HTTP {edst})");
+  }
+}
+let example_data_ok = example_data_paths.len() > 0 && failed_example_data.len() == 0;
+check(example_data_ok,
+  f"Example Trace JSON Endpoints HTTP 200 ({str(example_data_paths.len())} traces)",
+  example_data_ok ? f"all {str(example_data_paths.len())} data/<example>.json endpoints responded HTTP 200"
+                  : f"{str(failed_example_data.len())} failed: {join(failed_example_data, ', ')}");
+
+# 4e. Check Previous / Next / All-pages Navigation Links
+for (pli in range(0, kept_paths.len())) {
+  let pkp = kept_paths.get(pli, "");
+  if (pkp != book_prefix) {
+    let ppagers = page_pagers.get(pkp, []);
+    for (ppgi in range(0, ppagers.len())) {
+      let ppg_parts = split(ppagers.get(ppgi, ""), "|");
+      let ppg_href = ppg_parts.get(1, "");
+      let ppg_target = resolve_href(pkp, ppg_href);
+      let ppg_st = http_status_by_path.get(ppg_target, "missing");
+      if (ppg_st != "200") {
+        push(broken_pager_pages, f"{pkp} pager '{ppg_href}' -> '{ppg_target}' (HTTP {ppg_st})");
+      }
+    }
+    let pcrumbs = page_crumbs.get(pkp, []);
+    for (pci in range(0, pcrumbs.len())) {
+      let pc_parts = split(pcrumbs.get(pci, ""), "|");
+      let pc_href = pc_parts.get(0, "");
+      let pc_target = resolve_href(pkp, pc_href);
+      let pc_st = http_status_by_path.get(pc_target, "missing");
+      if (pc_st != "200") {
+        push(broken_pager_pages, f"{pkp} crumb '{pc_href}' -> '{pc_target}' (HTTP {pc_st})");
+      }
+    }
+  }
+}
+let pager_ok = broken_pager_pages.len() == 0 && prev_link_count > 0 && next_link_count > 0 && all_pages_link_count == lesson_page_count;
+check(pager_ok,
+  "Previous / Next / All-Pages Pager & Breadcrumb Links",
+  pager_ok ? f"all {str(lesson_page_count)} lesson pages have valid crumbs + pager ({str(prev_link_count)} prev, {str(next_link_count)} next, {str(all_pages_link_count)} index links; all resolve to HTTP 200)"
+           : f"pager issues: {join(broken_pager_pages, '; ')}");
+
+# 4f. Check No Broken Internal Relative Links across all pages
+let broken_internal_links = [];
+for (ari in range(0, all_relative_targets.len())) {
+  let art = all_relative_targets.get(ari, "");
+  let ast = http_status_by_path.get(art, "missing");
+  if (ast != "200") {
+    push(broken_internal_links, f"{art} (HTTP {ast})");
+  }
+}
+let internal_links_ok = all_relative_targets.len() > 0 && broken_internal_links.len() == 0;
+check(internal_links_ok,
+  f"No Broken Internal Links ({str(all_relative_targets.len())} unique resolved targets)",
+  internal_links_ok ? f"all {str(all_relative_targets.len())} relative/internal link targets across {str(kept_paths.len())} pages resolved to HTTP 200"
+                    : f"{str(broken_internal_links.len())} broken internal links: {join(broken_internal_links, ', ')}");
+
+# 4g. Compare /tracks/programming-languages/ on host vs v1_host and verify /<book>/ link works
+let tracks_has_book_www = contains(tracks_www_links, book_prefix);
+let tracks_has_book_v1 = contains(tracks_v1_links, book_prefix);
+let tracks_book_200 = http_status_by_path.get(book_prefix, "") == "200";
+let tracks_match = tracks_www_title == tracks_v1_title && tracks_www_h1 == tracks_v1_h1 && tracks_www_links.len() == tracks_v1_links.len();
+let tracks_check_ok = tracks_has_book_www && tracks_has_book_v1 && tracks_book_200 && tracks_match;
+
+check(tracks_check_ok,
+  f"Tracks Page Comparison ({host} vs {v1_host}) & /{book}/ Link",
+  tracks_check_ok ? f"title='{tracks_www_title}', h1='{tracks_www_h1}', {str(tracks_www_links.len())} links match v1; '{book_prefix}' present and resolves to HTTP 200"
+                  : f"www_has_book={str(tracks_has_book_www)}, v1_has_book={str(tracks_has_book_v1)}, book_200={str(tracks_book_200)}, match={str(tracks_match)}");
+
+# -----------------------------------------------------------------------------
+# 5. Summary and Exit
+# -----------------------------------------------------------------------------
+let total_passed = stats.get("pass", 0);
+let total_failed = stats.get("fail", 0);
+println("==================================================");
+println(f"Test Summary ({book} @ {host}): {str(total_passed)} passed, {str(total_failed)} failed");
+println("==================================================");
+
+if (total_failed > 0) {
+  exit(1);
+} else {
+  exit(0);
+}

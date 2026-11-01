@@ -61,6 +61,7 @@ cd neochart
 ## Test Suites
 
 - **[neochart](neochart/)**: Integration test suite for [neochart.com](https://neochart.com) (legal document library). Includes ad-hoc exploration notes ([EXPLORE.md](neochart/EXPLORE.md)), the test script ([neochart.lms](neochart/neochart.lms)), and runner ([run.sh](neochart/run.sh)).
+- **[egtry](egtry/)**: Reusable post-switch book integration test suite for [egtry.com](https://www.egtry.com) (`./run.sh --book <id> --host www.egtry.com`). Verifies all kept URLs from `url-map.json`, DOM metadata (`title`, `h1`), `.sv` viewer blocks and `data/<example>.json` traces, viewer assets (`simple.css`, `chapter.css`, `page.js`), prev/next pager links, internal relative links, and `/tracks/programming-languages/` parity against `v1.egtry.com`.
 
 ## Continuous Integration
 
