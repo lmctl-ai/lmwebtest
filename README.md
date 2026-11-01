@@ -1,22 +1,53 @@
 # lmwebtest
 
-A lightweight browser automation tool and LMScript DSL host for multi-step web integration testing, page checks, screenshots, and test suites.
+Web integration test suite and browser automation host powered by `lmwebtest`, `lmcurl`, `lmscript`, and `lmhtml`.
 
 [![CI](https://github.com/lmctl-ai/lmwebtest/actions/workflows/ci.yml/badge.svg)](https://github.com/lmctl-ai/lmwebtest/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Requires Node.js 20 or newer.
+## Architecture
 
-```sh
-npm install
-npm run browsers:install
-npm test
-npm run serve
+The workflow separates **navigation and download** from **extraction** from **orchestration**. Navigation has two interchangeable implementations — pick the cheaper one that works:
+
+| Role | Tool | DSL / Interface |
+|---|---|---|
+| Navigation + download, **HTTP** | **`lmcurl`** | `context curl: Curl` |
+| Navigation + download, **Browser** | **`lmwebtest`** | `context web: Web` (Playwright Chromium) |
+| **Extraction** | **`lmhtml`** | `context html: Html` (Lexbor DOM) |
+| **Orchestration** | **`lmscript`** | `.lms` |
+
+One `.lms` can hold both acquisition branches: try HTTP first, fall back to the browser only when the data is not in the fetched document. Keep the fallback a declared branch with an explicit condition — not a retry loop — so the script stays deterministic.
+
+```
+                     ┌──────────────────┐
+                     │    Target Site   │
+                     └────────┬─────────┘
+                              │
+               ┌──────────────┴──────────────┐
+               │                             │
+        (static / HTTP)            (client-rendered JS)
+               ▼                             ▼
+       ┌──────────────┐              ┌──────────────┐
+       │    lmcurl    │              │  lmwebtest   │
+       │ (Curl DSL)   │              │  (Web DSL)   │
+       └───────┬──────┘              └───────┬──────┘
+               │                             │
+               └──────────────┬──────────────┘
+                              ▼
+                      Raw Rendered DOM
+                              ▼
+                     ┌──────────────────┐
+                     │      lmhtml      │  (Lexbor DOM extraction)
+                     └────────┬─────────┘
+                              ▼
+                     ┌──────────────────┐
+                     │     lmscript     │  (Assertions & reporting)
+                     └──────────────────┘
 ```
 
 ## LMScript DSL (`context web: Web`)
 
-lmwebtest provides an LMScript DSL so `.lms` scripts can drive multi-step browser flows directly without shelling out:
+`lmwebtest` exposes a DSL surface matching `lmhtml` conventions (`context web: Web` and `context report: Report`) so an `.lms` script can drive multi-step browser flows directly:
 
 ```lmscript
 let test_dsl = _dsl_ cli="lmwebtest" install="github:lmctl-ai/lmwebtest@latest";
@@ -41,6 +72,23 @@ end _dsl_
 
 See [examples/moonshot-pricing.lms](examples/moonshot-pricing.lms) for an end-to-end example acquiring client-rendered pricing tables and handing them to `lmhtml`.
 
+## Installation
+
+Install via `lmscript`:
+
+```sh
+lmscript install github:lmctl-ai/lmwebtest
+```
+
+Or run locally from checkout:
+
+```sh
+npm install
+npm run browsers:install
+npm test
+npm run serve
+```
+
 ## CLI Usage
 
 The CLI supports quick ad-hoc checks, screenshots, and running Playwright test suites:
@@ -55,40 +103,10 @@ node src/cli.js run tests/security.spec.ts
 Use `npm link` to register `lmwebtest` locally, then substitute `lmwebtest` for
 `node src/cli.js`. `--help` lists options.
 
-`test` checks HTTP status (200 by default, configurable with `--status`), console
-errors, uncaught JavaScript errors, failed requests, HTTP resource errors, and
-broken loaded images. It reports JSON with the title and navigation load time.
-Use `--title` for an exact title and repeat `--selector` for visible elements.
-`--timeout` sets navigation/assertion timeouts in milliseconds (default 10000).
+## Test Suites and Examples
 
-`screenshot` captures the full page; use `--no-js` to disable JavaScript.
-Screenshot success means the file was captured; observed page errors remain in
-the JSON report. Exit codes: 0 success, 1 failed check/runtime error, 2 invalid
-arguments. `run` forwards arguments and exit status to the bundled test suite.
-
-## Util/service model and consumer workspaces
-
-lmwebtest owns the tool, infrastructure, workspace conventions, scaffolding and
-batch runner. Consumer website teams own and author their site's test cases.
-Start with [consumer onboarding](docs/ONBOARDING.md).
-
-```sh
-lmwebtest init my-site --url http://127.0.0.1:8080
-lmwebtest run my-site
-lmwebtest batch
-lmwebtest run --all
-```
-
-`init` creates config, starter smoke spec and README under `sites/<site-name>/`.
-It refuses to overwrite existing workspaces. Consumers expand their own cases and
-run `lmwebtest run <site>` once their changed application is served.
-
-`batch` and `run --all` run every configured site sequentially and continue after
-failures. A JSON report is emitted on stdout and saved to `test-results/batch-report.json`.
-
-## Test Suites
-
-- **[neochart](neochart/)**: Integration test suite for [neochart.com](https://neochart.com) (legal document library). Includes ad-hoc exploration notes ([EXPLORE.md](neochart/EXPLORE.md)), the test script ([neochart.lms](neochart/neochart.lms)), and runner ([run.sh](neochart/run.sh)).
+- **[examples/moonshot-pricing.lms](examples/moonshot-pricing.lms)**: Worked example acquiring Moonshot client-rendered pricing tables and handing them to `lmhtml` for extraction.
+- **[neochart](neochart/)**: Integration test suite for [neochart.com](https://neochart.com) (legal document library). Includes exploration notes ([EXPLORE.md](neochart/EXPLORE.md)), test script ([neochart.lms](neochart/neochart.lms)), and runner ([run.sh](neochart/run.sh)).
 - **[egtry](egtry/)**: Reusable post-switch book integration test suite for [egtry.com](https://www.egtry.com).
 - **[sites/localweb](sites/localweb/)**: Reference starter scaffold.
 
