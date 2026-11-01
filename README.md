@@ -50,7 +50,7 @@ One `.lms` can hold both acquisition branches: try HTTP first, fall back to the 
 `lmwebtest` exposes a DSL surface matching `lmhtml` conventions (`context web: Web` and `context report: Report`) so an `.lms` script can drive multi-step browser flows directly:
 
 ```lmscript
-let test_dsl = _dsl_ cli="lmwebtest" install="github:lmctl-ai/lmwebtest@latest";
+let test_dsl = _lmcode_ cli="lmwebtest" install="github:lmctl-ai/lmwebtest@latest";
 let page = web.navigate("https://platform.kimi.ai/docs/pricing/batch");
 page.wait_for("table tbody tr", 15000);
 
@@ -67,7 +67,7 @@ for (i in range(0, rows.len())) {
 }
 
 page.save_html("test-results/rendered.html");
-end _dsl_
+end _lmcode_
 ```
 
 See [examples/moonshot-pricing.lms](examples/moonshot-pricing.lms) for an end-to-end example acquiring client-rendered pricing tables and handing them to `lmhtml`.
