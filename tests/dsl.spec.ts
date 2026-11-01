@@ -62,7 +62,7 @@ test('CLI exposes --dsl-schema and --dsl-schema --json', async () => {
 
 test('LMScript can drive multi-step flow via lmwebtest DSL', async ({ baseURL }) => {
   const script = `
-dsl = _dsl_ cli="lmwebtest";
+dsl = _dsl_ cli="${cli}";
 let page = web.navigate("${baseURL}");
 page.wait_for("#file-table");
 let title = page.title();
@@ -84,7 +84,7 @@ println(res.stdout);
 exit(res.code);
 `;
   const result = await runLmscript(script);
-  expect(result.code).toBe(0);
+  expect(result.code, result.stderr).toBe(0);
   expect(result.stdout).toContain('Title: File Explorer');
   expect(result.stdout).toContain('{"ok":true,"result":null}');
 
@@ -94,7 +94,7 @@ exit(res.code);
 
 test('LMScript DSL reports locate runtime error with exit 3', async ({ baseURL }) => {
   const script = `
-dsl = _dsl_ cli="lmwebtest";
+dsl = _dsl_ cli="${cli}";
 let page = web.navigate("${baseURL}");
 page.wait_for("#nonexistent-selector-99", 500);
 end _dsl_
@@ -107,7 +107,7 @@ println(res.stdout);
 exit(res.code);
 `;
   const result = await runLmscript(script);
-  expect(result.code).toBe(3);
+  expect(result.code, result.stderr).toBe(3);
   expect(result.stdout).toContain('"phase":"run"');
   expect(result.stdout).toContain('"code":"RUN_HOST"');
   expect(result.stdout).toContain('"line":4');
@@ -115,7 +115,7 @@ exit(res.code);
 
 test('LMScript DSL report.fail_if_any causes app failure with exit 4', async () => {
   const script = `
-dsl = _dsl_ cli="lmwebtest";
+dsl = _dsl_ cli="${cli}";
 report.add("error", "check", 1, "test failure");
 report.fail_if_any();
 end _dsl_
@@ -128,7 +128,7 @@ println(res.stdout);
 exit(res.code);
 `;
   const result = await runLmscript(script);
-  expect(result.code).toBe(4);
+  expect(result.code, result.stderr).toBe(4);
   expect(result.stdout).toContain('"phase":"app"');
   expect(result.stdout).toContain('"code":"APP_FAIL"');
   expect(result.stdout).toContain('"line":4');

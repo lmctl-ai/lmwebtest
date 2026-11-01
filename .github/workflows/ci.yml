@@ -41,6 +41,9 @@ jobs:
       - name: install dependencies
         run: npm ci
 
+      - name: link lmwebtest
+        run: npm link
+
       - name: install playwright browsers
         run: npm run browsers:install
 
