@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
 import { mkdir, stat } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
@@ -232,4 +232,12 @@ async function main() {
   console.log(JSON.stringify(result, null, 2));
   process.exitCode = result.ok ? 0 : 1;
 }
-main().catch(error => { console.error(JSON.stringify({ ok: false, error: error.message })); process.exitCode = 1; });
+const isDirectExecution = process.argv[1] && (
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url) ||
+  process.argv[1].endsWith('/cli.js') ||
+  process.argv[1].endsWith('/lmwebtest')
+);
+
+if (isDirectExecution) {
+  main().catch(error => { console.error(JSON.stringify({ ok: false, error: error.message })); process.exitCode = 1; });
+}

@@ -35,6 +35,9 @@ jobs:
         with:
           node-version: 24
 
+      - name: install lmscript
+        run: npm install -g @lmctl-ai/lmctl@latest
+
       - name: install dependencies
         run: npm ci
 
@@ -46,9 +49,6 @@ jobs:
 
       - name: run test suite
         run: npm test
-
-      - name: install lmscript
-        run: npm install -g @lmctl-ai/lmctl@latest
 
       - name: run worked example
         run: lmscript examples/moonshot-pricing.lms
