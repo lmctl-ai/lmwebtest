@@ -74,10 +74,15 @@ See [examples/moonshot-pricing.lms](examples/moonshot-pricing.lms) for an end-to
 
 ## Installation
 
-Install via `lmscript`:
+Install via `lmscript` (requires Node.js >= 20 on PATH; downloads self-contained bundle into tool cache):
 
 ```sh
 lmscript install github:lmctl-ai/lmwebtest
+```
+
+Playwright Chromium browser binaries are installed into `~/.cache/ms-playwright` via:
+```sh
+npx playwright install chromium
 ```
 
 Or run locally from checkout:

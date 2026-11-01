@@ -92,23 +92,29 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    /* Build command line for node */
-    char cmd[32768] = "node ";
     const char* user_appdata = getenv("LOCALAPPDATA");
     if (!user_appdata) user_appdata = getenv("APPDATA");
     if (!user_appdata) user_appdata = "C:\\Temp";
 
     char script[4096];
-    snprintf(script, sizeof(script), "\"%s\\lmwebtest\\runtime-v%s\\src\\cli.js\"", user_appdata, VERSION);
+    snprintf(script, sizeof(script), "%s\\lmwebtest\\runtime-v%s\\src\\cli.js", user_appdata, VERSION);
 
-    strcat(cmd, script);
-    for (int i = 1; i < argc; i++) {
-        strcat(cmd, " \"");
-        strcat(cmd, argv[i]);
-        strcat(cmd, "\"");
+    char** node_args = (char**)malloc((argc + 2) * sizeof(char*));
+    if (!node_args) {
+        fprintf(stderr, "lmwebtest: out of memory\n");
+        return 1;
     }
 
-    return system(cmd);
+    node_args[0] = "node";
+    node_args[1] = script;
+    for (int i = 1; i < argc; i++) {
+        node_args[i + 1] = argv[i];
+    }
+    node_args[argc + 1] = NULL;
+
+    int ret = (int)_spawnvp(_P_WAIT, "node", (const char* const*)node_args);
+    free(node_args);
+    return ret;
 }
 WIN_EOF
 

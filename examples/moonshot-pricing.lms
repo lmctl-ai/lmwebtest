@@ -57,7 +57,7 @@ require(contains(html_content, "kimi-"), "HTML must contain kimi model names");
 println("HTML verified: size = " + str(len(html_content)) + " bytes");
 
 println("3. Composing with lmhtml: parsing rendered table with lmhtml...");
-let parse_dsl = _dsl_ cli="/home/mma/.cache/lmscript/tools/github/lmctl-ai/lmhtml/latest/lmhtml";
+let parse_dsl = _dsl_ cli="lmhtml" install="github:lmctl-ai/lmhtml@latest";
 let doc = html.load("test-results/moonshot-batch-pricing.html");
 let table_rows = doc.select("table tbody tr");
 print("lmhtml verified row count: " + str(table_rows.len()));
