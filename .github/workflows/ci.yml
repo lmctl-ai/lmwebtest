@@ -36,7 +36,7 @@ jobs:
           node-version: 24
 
       - name: install lmscript
-        run: npm install -g @lmctl-ai/lmctl@latest
+        run: npm install -g @lmctl-ai/lmctl@0.2.426
 
       - name: install dependencies
         run: npm ci
