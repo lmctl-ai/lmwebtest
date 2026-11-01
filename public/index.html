@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="data:,">
+  <title>File Explorer</title>
+  <script src="/vendor/htmx.min.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 860px; margin: 20px auto; padding: 0 20px; }
+    table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+    th, td { padding: 8px 12px; border: 1px solid #ddd; text-align: left; }
+    th { background: #f5f5f5; }
+    button { padding: 4px 10px; cursor: pointer; margin: 1px; }
+    #create-form, #editor-panel, #move-dialog { margin: 10px 0; padding: 15px; border: 1px solid #ccc; border-radius: 4px; background: #fafafa; }
+    textarea { width: 100%; font-family: monospace; box-sizing: border-box; }
+    #toolbar { margin: 10px 0; }
+    #toolbar button { margin-right: 5px; padding: 6px 14px; }
+    input[type="text"], input:not([type]) { padding: 4px 8px; }
+    #empty-msg { color: #888; font-style: italic; }
+  </style>
+</head>
+<body>
+  <h1 id="heading">File Explorer</h1>
+
+  <div id="toolbar">
+    <button id="add-file-btn">Add File</button>
+    <button id="add-folder-btn">Add Folder</button>
+  </div>
+
+  <div id="create-form" style="display:none">
+    <form id="new-item-form" hx-post="/api/files" hx-target="#file-list" hx-swap="innerHTML">
+      <input type="hidden" name="type" id="create-type" value="file" />
+      <p><label>Name: <input name="name" id="create-name" required /></label></p>
+      <div id="content-field">
+        <p>Content:<br><textarea name="content" id="create-content" rows="5"></textarea></p>
+      </div>
+      <button type="submit">Create</button>
+      <button type="button">Cancel</button>
+    </form>
+  </div>
+
+  <div id="file-list" hx-get="/api/files" hx-trigger="load">
+    Loading...
+  </div>
+
+  <div id="editor-panel"></div>
+
+  <div id="move-dialog" style="display:none">
+    <h3>Move / Rename</h3>
+    <form id="move-form" hx-target="#file-list" hx-swap="innerHTML">
+      <input type="hidden" id="move-current-name" />
+      <p><label>New name: <input name="newName" id="move-new-name" required /></label></p>
+      <button type="submit" id="move-confirm">Move</button>
+      <button type="button">Cancel</button>
+    </form>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
