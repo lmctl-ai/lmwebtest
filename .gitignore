@@ -1,0 +1,17 @@
+# Working state and captures
+work/
+.playwright-cli/
+build*/
+bin/
+.bin/
+
+# Compiled bytecode and teamfiles
+*.dslb
+*.lmc
+p1.txt
+
+# Separate dev checkouts and environments
+/lmhtml/
+node_modules/
+.env
+.DS_Store

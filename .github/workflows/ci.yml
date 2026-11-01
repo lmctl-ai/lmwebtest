@@ -1,0 +1,47 @@
+name: ci
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: ubuntu-test
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: setup node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - name: install lmscript
+        run: npm install -g @lmctl-ai/lmctl@0.2.446
+
+      - name: cache lmhtml binary
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        with:
+          path: bin/lmhtml
+          key: lmhtml-bb8bc196f46400c7a54018be9efb310b91cb8e28-${{ runner.arch }}
+
+      - name: install build tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq cmake build-essential
+
+      - name: run integration test
+        run: ./neochart/run.sh

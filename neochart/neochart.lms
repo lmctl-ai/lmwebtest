@@ -1,0 +1,298 @@
+# neochart.lms - Integration test for neochart.com
+# Uses curl to capture raw HTML, lmhtml (via DSL bytecode) to parse DOM elements,
+# and lmscript to assert stability of HTTP routing, metadata, headings, navigation, and links.
+
+# -----------------------------------------------------------------------------
+# 0. Clean Stale State
+# -----------------------------------------------------------------------------
+mkdir("work");
+delete_file("work/home.html");
+delete_file("work/about.html");
+delete_file("work/extracted.json");
+delete_file("work/extract.dslb");
+
+let stats = {pass: 0, fail: 0};
+
+fn check(condition, name, detail) {
+  if (condition) {
+    stats["pass"] = stats.get("pass", 0) + 1;
+    println(f"[PASS] {name}: {detail}");
+  } else {
+    stats["fail"] = stats.get("fail", 0) + 1;
+    println(f"[FAIL] {name}: {detail}");
+  }
+}
+
+# -----------------------------------------------------------------------------
+# 1. HTTP Redirect Check: apex domain redirects exactly 301 to https://www.neochart.com/
+# -----------------------------------------------------------------------------
+let redir_res = system(["curl", "-s", "-I", "--max-time", "20", "--retry", "2", "-o", "/dev/null", "-w", "%{http_code} %{redirect_url}", "https://neochart.com"]);
+let redir_timed_out = redir_res.get("timed_out", false);
+let redir_code_exit = redir_res.get("code", -1);
+let redir_out = trim(redir_res.get("stdout", ""));
+let redir_parts = split(redir_out, " ");
+let redir_code = redir_parts.get(0, "");
+let redir_target = redir_parts.get(1, "");
+let redir_stderr = trim(redir_res.get("stderr", ""));
+
+let redir_ok = !redir_timed_out && redir_code_exit == 0 && redir_code == "301" && redir_target == "https://www.neochart.com/";
+check(redir_ok,
+  "Apex HTTP Redirect",
+  redir_ok ? f"https://neochart.com returned HTTP {redir_code} -> {redir_target}"
+           : f"expected HTTP 301 to https://www.neochart.com/, got HTTP {redir_code} to {redir_target} (exit {str(redir_code_exit)}, stderr: {redir_stderr})");
+
+# -----------------------------------------------------------------------------
+# 2. Fetch Raw HTML for Homepage and Linked Page
+# -----------------------------------------------------------------------------
+let fetch_home = system(["curl", "-fsSL", "--max-time", "20", "--retry", "2", "-w", "%{http_code}", "https://www.neochart.com/", "-o", "work/home.html"]);
+let home_timed_out = fetch_home.get("timed_out", false);
+let home_code_exit = fetch_home.get("code", -1);
+let home_http_code = trim(fetch_home.get("stdout", ""));
+let home_stderr = trim(fetch_home.get("stderr", ""));
+let home_captured = !home_timed_out && home_code_exit == 0 && home_http_code == "200" && file_exists("work/home.html");
+check(home_captured,
+  "Homepage HTML Capture",
+  home_captured ? f"HTTP {home_http_code} saved to work/home.html"
+                : f"expected HTTP 200, got {home_http_code} (curl exit {str(home_code_exit)}, stderr: {home_stderr})");
+
+let fetch_about = system(["curl", "-fsSL", "--max-time", "20", "--retry", "2", "-w", "%{http_code}", "https://www.neochart.com/about/index.html", "-o", "work/about.html"]);
+let about_timed_out = fetch_about.get("timed_out", false);
+let about_code_exit = fetch_about.get("code", -1);
+let about_http_code = trim(fetch_about.get("stdout", ""));
+let about_stderr = trim(fetch_about.get("stderr", ""));
+let about_captured = !about_timed_out && about_code_exit == 0 && about_http_code == "200" && file_exists("work/about.html");
+check(about_captured,
+  "Linked Page HTML Capture",
+  about_captured ? f"HTTP {about_http_code} saved to work/about.html"
+                 : f"expected HTTP 200, got {about_http_code} (curl exit {str(about_code_exit)}, stderr: {about_stderr})");
+
+# Early abort if network capture failed (prevents cascading parse crashes)
+if (stats.get("fail", 0) > 0) {
+  println("==================================================");
+  println(f"Test Aborted Early: {str(stats.get('pass', 0))} passed, {str(stats.get('fail', 0))} failed during network capture");
+  println("==================================================");
+  exit(1);
+}
+
+# -----------------------------------------------------------------------------
+# 3. Parse RAW DOM and Extract Elements via lmhtml
+# -----------------------------------------------------------------------------
+p = _lmcode_ cli="lmhtml" install="github:lmctl-ai/lmhtml@latest";
+let home = html.load("work/home.html");
+report.add("home_title", "home.html", 0, home.title());
+
+let h1s = home.select("h1");
+if (h1s.len() > 0) {
+  report.add("home_h1", "home.html", 0, h1s.at(0).text());
+}
+
+let forms = home.select("form.searchbar");
+if (forms.len() > 0) {
+  let f = forms.at(0);
+  report.add("search_action", "home.html", 0, f.attr("action"));
+}
+
+let inputs = home.select("form.searchbar input");
+if (inputs.len() > 0) {
+  report.add("search_input", "home.html", 0, inputs.at(0).attr("name"));
+}
+
+let links = home.links();
+for (i in range(0, links.len())) {
+  let url = links.at(i);
+  report.add("home_link", "home.html", 0, url);
+}
+
+let about = html.load("work/about.html");
+report.add("about_title", "about.html", 0, about.title());
+
+let ab_h1s = about.select("h1");
+if (ab_h1s.len() > 0) {
+  report.add("about_h1", "about.html", 0, ab_h1s.at(0).text());
+}
+
+let ab_h2s = about.select("h2");
+for (j in range(0, ab_h2s.len())) {
+  let h2 = ab_h2s.at(j);
+  report.add("about_h2", "about.html", 0, h2.text());
+}
+
+report.write_json("work/extracted.json");
+end _lmcode_
+savedsl(p, "work/extract.dslb");
+
+let lmhtml_bin = env("LMHTML", "");
+if (lmhtml_bin != "" && !file_exists(lmhtml_bin)) {
+  lmhtml_bin = "";
+}
+if (lmhtml_bin == "") {
+  let found = which("lmhtml");
+  if (found != null) {
+    lmhtml_bin = found;
+  }
+}
+
+if (lmhtml_bin == "") {
+  check(false,
+    "lmhtml Host Resolution",
+    "lmhtml binary not found on PATH and LMHTML is not set to an executable path");
+  println("==================================================");
+  println(f"Test Aborted Early: {str(stats.get('pass', 0))} passed, {str(stats.get('fail', 0))} failed during DOM extraction");
+  println("==================================================");
+  exit(1);
+}
+
+let run_res = system([lmhtml_bin, "--lmcode", "work/extract.dslb"]);
+let extract_code = run_res.get("code", -1);
+let extract_timed_out = run_res.get("timed_out", false);
+let extract_stderr = trim(run_res.get("stderr", ""));
+
+let report_data = {};
+let findings = [];
+let parse_ok = false;
+
+if (extract_code == 0 && !extract_timed_out && file_exists("work/extracted.json")) {
+  report_data = json_parse(read_file("work/extracted.json"));
+  findings = report_data.get("findings", []);
+  if (findings.len() > 0) {
+    parse_ok = true;
+  }
+}
+
+check(parse_ok,
+  "lmhtml DOM Extraction",
+  parse_ok ? f"extracted {str(findings.len())} structured DOM items"
+           : f"lmhtml exit {str(extract_code)}, timed_out={str(extract_timed_out)}, stderr: {extract_stderr}, items: {str(findings.len())}");
+
+if (!parse_ok) {
+  println("==================================================");
+  println(f"Test Aborted Early: {str(stats.get('pass', 0))} passed, {str(stats.get('fail', 0))} failed during DOM extraction");
+  println("==================================================");
+  exit(1);
+}
+
+# -----------------------------------------------------------------------------
+# 4. Assert on Extracted DOM Elements
+# -----------------------------------------------------------------------------
+let home_title = "";
+let home_h1 = "";
+let search_action = "";
+let search_input = "";
+let home_links = [];
+let about_title = "";
+let about_h1 = "";
+let about_h2s = [];
+
+for (k in range(0, findings.len())) {
+  let item = findings.get(k, {});
+  let kind = item.get("kind", "");
+  let msg = item.get("message", "");
+  if (kind == "home_title") { home_title = msg; }
+  if (kind == "home_h1") { home_h1 = msg; }
+  if (kind == "search_action") { search_action = msg; }
+  if (kind == "search_input") { search_input = msg; }
+  if (kind == "home_link") { push(home_links, msg); }
+  if (kind == "about_title") { about_title = msg; }
+  if (kind == "about_h1") { about_h1 = msg; }
+  if (kind == "about_h2") { push(about_h2s, msg); }
+}
+
+# Homepage assertions
+let expected_home_title = "neochart — Legal Document Library";
+let title_ok = home_title == expected_home_title;
+check(title_ok,
+  "Homepage Page Title",
+  title_ok ? f"'{home_title}' matches expected title"
+           : f"expected '{expected_home_title}', got '{home_title}'");
+
+let expected_h1 = "neochart · a free legal document library";
+let h1_ok = home_h1 == expected_h1;
+check(h1_ok,
+  "Homepage Brand Heading",
+  h1_ok ? f"'{home_h1}' matches expected brand heading"
+        : f"expected '{expected_h1}', got '{home_h1}'");
+
+let cta_ok = search_action == "/search/" && search_input == "q";
+check(cta_ok,
+  "Search Form CTA",
+  cta_ok ? f"action='{search_action}', input name='{search_input}'"
+         : f"expected action='/search/' and input='q', got action='{search_action}', input='{search_input}'");
+
+let core_targets = [
+  "/about/index.html",
+  "/constitution/index.html",
+  "/usc/index.html",
+  "/texas/index.html",
+  "/caselaw/index.html"
+];
+
+let missing_links = [];
+for (m in range(0, core_targets.len())) {
+  let target = core_targets.get(m, "");
+  if (!contains(home_links, target)) {
+    push(missing_links, target);
+  }
+}
+let links_ok = missing_links.len() == 0;
+check(links_ok,
+  "Core Library Links",
+  links_ok ? f"all 5 core targets present across {str(home_links.len())} extracted links"
+           : f"missing links: {join(missing_links, ', ')}");
+
+# Main nav link resolution check: loop ALL five core links for HTTP 200
+for (n in range(0, core_targets.len())) {
+  let path = core_targets.get(n, "");
+  let url = "https://www.neochart.com" + path;
+  let res = system(["curl", "-fsSL", "--max-time", "20", "--retry", "2", "-o", "/dev/null", "-w", "%{http_code}", url]);
+  let code = trim(res.get("stdout", ""));
+  let res_exit = res.get("code", -1);
+  let res_timed_out = res.get("timed_out", false);
+  let res_ok = !res_timed_out && res_exit == 0 && code == "200";
+  check(res_ok,
+    f"Nav Link Resolution ({path})",
+    res_ok ? f"HTTP {code}" : f"expected HTTP 200, got HTTP {code} (curl exit {str(res_exit)})");
+}
+
+# Linked page (/about/index.html) assertions
+let expected_about_title = "About & provenance — neochart";
+let about_title_ok = about_title == expected_about_title;
+check(about_title_ok,
+  "Linked Page Title",
+  about_title_ok ? f"'{about_title}' matches expected title"
+                 : f"expected '{expected_about_title}', got '{about_title}'");
+
+let expected_about_h1 = "About & provenance";
+let about_h1_ok = about_h1 == expected_about_h1;
+check(about_h1_ok,
+  "Linked Page Heading",
+  about_h1_ok ? f"'{about_h1}' matches expected h1"
+              : f"expected '{expected_about_h1}', got '{about_h1}'");
+
+let required_sections = ["Sources", "Method", "Not legal advice"];
+let missing_sections = [];
+for (s in range(0, required_sections.len())) {
+  let sec = required_sections.get(s, "");
+  if (!contains(about_h2s, sec)) {
+    push(missing_sections, sec);
+  }
+}
+let sections_ok = missing_sections.len() == 0;
+check(sections_ok,
+  "Linked Page Key Sections",
+  sections_ok ? f"verified {join(required_sections, ', ')}"
+              : f"missing h2 sections: {join(missing_sections, ', ')}");
+
+# -----------------------------------------------------------------------------
+# Summary and Exit
+# -----------------------------------------------------------------------------
+let total_passed = stats.get("pass", 0);
+let total_failed = stats.get("fail", 0);
+println("==================================================");
+println(f"Test Summary: {str(total_passed)} passed, {str(total_failed)} failed");
+println("==================================================");
+
+if (total_failed > 0) {
+  exit(1);
+} else {
+  exit(0);
+}
