@@ -3,6 +3,8 @@ import { writeFileSync } from 'node:fs';
 import { StrList } from './std.js';
 import { checkBrowserError } from '../cli.js';
 
+export { checkBrowserError };
+
 export class Web {
   constructor() {
     this._browser = null;
