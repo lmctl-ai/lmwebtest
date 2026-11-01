@@ -65,7 +65,7 @@ test('CLI run delegates to the test runner', async () => {
   expect(file.stdout).toContain('Total: 3 tests');
   const directory = await run('run', 'tests', '--list');
   expect(directory.code).toBe(0);
-  expect(directory.stdout).toContain('Total: 19 tests');
+  expect(directory.stdout).toContain('Total: 25 tests');
   expect((await run('run', 'no-such-target', '--list')).code).toBe(1);
 });
 

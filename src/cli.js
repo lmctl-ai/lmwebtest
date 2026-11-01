@@ -8,13 +8,36 @@ import { spawn } from 'node:child_process';
 import { chromium, expect } from '@playwright/test';
 import { initSite, batchSites } from './sites.js';
 
+const VERSION = '0.1.0';
+
+export function checkBrowserError(error) {
+  if (error && typeof error.message === 'string') {
+    if (error.message.includes("Executable doesn't exist") || error.message.includes('playwright install')) {
+      const friendly = new Error(
+        'Playwright browsers are missing or out of date. Run "npm run browsers:install" (or "npx playwright install chromium") to install them.'
+      );
+      friendly.cause = error;
+      return friendly;
+    }
+  }
+  return error;
+}
+
 const help = `Usage:
+  lmwebtest --version | -v
+  lmwebtest --dsl-signatures | --lmcode-signatures
+  lmwebtest --dsl-schema [--json] | --lmcode-schema [--json]
+  lmwebtest --dsl <bytecode.dslb> | --lmcode <bytecode.dslb>
   lmwebtest test <url> [--status 200] [--title "Exact title"] [--selector CSS] [--timeout 10000]
   lmwebtest screenshot <url> --out <file.png> [--no-js] [--timeout 10000]
   lmwebtest init <site-name> [--url <url>]
   lmwebtest batch
   lmwebtest run --all
   lmwebtest run [site-id|file|dir] [Playwright test options]
+
+LMScript DSL:
+  Provides 'context web: Web' and 'context report: Report' for multi-step browser
+  integration testing in .lms scripts, compiling against --dsl-schema.
 
 Checks HTTP status (default 200), console errors, uncaught page errors, failed
 requests, HTTP resource errors, and broken images observed through page load.
@@ -23,7 +46,50 @@ Outputs JSON; exits 1 on failed checks and 2 on invalid arguments.
 `;
 
 async function main() {
-  const [command, ...args] = process.argv.slice(2);
+  const argv = process.argv.slice(2);
+  const [command, ...args] = argv;
+
+  // --version
+  if (command === '--version' || command === '-v') {
+    process.stdout.write(`lmwebtest ${VERSION}\n`);
+    process.exitCode = 0;
+    return;
+  }
+
+  // --dsl-signatures / --lmcode-signatures
+  if (command === '--dsl-signatures' || command === '--lmcode-signatures') {
+    const { getCanonicalSignatures } = await import('./dsl/schema.js');
+    process.stdout.write(getCanonicalSignatures());
+    process.exitCode = 0;
+    return;
+  }
+
+  // --dsl-schema / --lmcode-schema [--json]
+  if (command === '--dsl-schema' || command === '--lmcode-schema') {
+    const { SCHEMA_BYTES, getSchemaSummary } = await import('./dsl/schema.js');
+    if (args.includes('--json')) {
+      process.stdout.write(SCHEMA_BYTES);
+      process.exitCode = 0;
+      return;
+    }
+    process.stdout.write(getSchemaSummary());
+    process.exitCode = 0;
+    return;
+  }
+
+  // --dsl / --lmcode [FILE]
+  if (command === '--dsl' || command === '--lmcode' || (command === '--dry-run' && (args[0] === '--dsl' || args[0] === '--lmcode'))) {
+    const fileArg = command === '--dry-run' ? args[1] : args[0];
+    if (!fileArg || fileArg.startsWith('--')) {
+      console.error(JSON.stringify({ ok: false, phase: 'cli', code: 'CLI_INVALID_ARGUMENT', message: 'Missing bytecode file argument for --dsl' }));
+      process.exitCode = 2;
+      return;
+    }
+    const { executeDslFile } = await import('./dsl/vm.js');
+    process.exitCode = await executeDslFile(fileArg);
+    return;
+  }
+
   const workspace = fileURLToPath(new URL('../', import.meta.url));
   if (command === 'init') {
     try { console.log(JSON.stringify(await initSite(workspace, args), null, 2)); }
@@ -126,7 +192,11 @@ async function main() {
   let browser;
   const result = { ok: false, url: url.href, errors: [] };
   try {
-    browser = await chromium.launch();
+    try {
+      browser = await chromium.launch();
+    } catch (launchErr) {
+      throw checkBrowserError(launchErr);
+    }
     const page = await browser.newPage({ javaScriptEnabled: !options['no-js'], viewport: { width: 1280, height: 720 } });
     page.setDefaultTimeout(Number(options.timeout));
     page.on('console', message => { if (message.type() === 'error') result.errors.push(`Console: ${message.text()}`); });
