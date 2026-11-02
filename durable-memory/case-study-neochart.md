@@ -36,7 +36,7 @@ First, playwright-cli defaults to looking for Google Chrome at /opt/google/chrom
 
 Second, the dependency synchronization script in lmhtml is named sync-lexbor.sh rather than sync-deps.sh.
 
-Third, published lmhtml release v0.7.4 emits DSL bytecode v5 while lmscript 0.2.446 emits v6, so run.sh builds from a pinned source commit (about 2.5 minutes cold, 1.9 s warm). In addition, lmhtml retired --dsl options for --lmcode options, and lmscript 0.2.446 has no run_lmcode function (resulting in an undefined function error), so the script uses savedsl plus --lmcode.
+Third, the test suites adopt latest versions by design, with breakage fixed forward. When published releases target an older bytecode version than the installed lmscript compiler, the runner builds lmhtml from git main HEAD (about 2.5 minutes cold, 1.9 s warm). Program execution is handled via run_lmcode with the host invocation contract.
 
 ## Dynamic search behavior
 

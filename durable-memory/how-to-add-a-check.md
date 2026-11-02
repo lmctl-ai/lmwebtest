@@ -1,6 +1,6 @@
 # Adding a check to an integration test
 
-Adding a new assertion to the neochart integration suite requires updating DOM element extraction and evaluating the finding in the assertion loop.
+Adding a new assertion to an integration suite requires updating DOM element extraction and evaluating the finding in the assertion loop.
 
 ## Overview of the check lifecycle
 

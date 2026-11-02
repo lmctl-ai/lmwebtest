@@ -1,0 +1,192 @@
+# app.lms - Mock Web Application with Authentication and Buttons
+# Implemented in lmcode SAM handlers for lmmock loopback HTTP server.
+
+program = _lmcode_ schema="schema.json";
+
+fn get_session_cookie(cookie_header: string) -> string {
+  let token = "";
+  if (cookie_header != "") {
+    let parts = str_split(cookie_header, ";");
+    for (i in range(0, parts.len())) {
+      let part = str_trim(parts.at(i));
+      if (str_starts_with(part, "session=")) {
+        token = str_substr(part, 8, str_len(part));
+      }
+    }
+  }
+  return token;
+}
+
+@health
+fn handle_health(x: Exchange) -> void implements Handler {
+  x.status(200);
+  x.set_header("Content-Type", "text/plain; charset=utf-8");
+  x.send("OK");
+}
+
+@login_page
+fn handle_login_page(x: Exchange) -> void implements Handler {
+  x.status(200);
+  x.set_header("Content-Type", "text/html; charset=utf-8");
+  x.send("<!DOCTYPE html>\n" +
+    "<html lang=\"en\">\n" +
+    "<head><meta charset=\"utf-8\"><title>Sign In — Demo App</title></head>\n" +
+    "<body>\n" +
+    "  <h1>Sign In</h1>\n" +
+    "  <form id=\"login-form\" action=\"/login\" method=\"POST\">\n" +
+    "    <label for=\"username\">Username</label>\n" +
+    "    <input type=\"text\" id=\"username\" name=\"username\" />\n" +
+    "    <label for=\"password\">Password</label>\n" +
+    "    <input type=\"password\" id=\"password\" name=\"password\" />\n" +
+    "    <button type=\"submit\" id=\"submit-login\">Sign In</button>\n" +
+    "  </form>\n" +
+    "</body>\n" +
+    "</html>\n");
+}
+
+@login_post
+fn handle_login_post(x: Exchange) -> void implements Handler {
+  let u = form_get(x.body(), "username");
+  let p = form_get(x.body(), "password");
+
+  if (secure_equal(u, "demo") && secure_equal(p, "demo-pass")) {
+    let tok = random_token();
+    x.set("session:" + tok, u);
+    x.status(303);
+    x.set_header("Location", "/dashboard");
+    x.set_header("Set-Cookie", "session=" + tok + "; Path=/; HttpOnly; SameSite=Lax");
+    x.send("Redirecting to /dashboard...");
+  } else {
+    x.status(401);
+    x.set_header("Content-Type", "text/html; charset=utf-8");
+    x.send("<!DOCTYPE html>\n" +
+      "<html lang=\"en\">\n" +
+      "<head><meta charset=\"utf-8\"><title>Login Failed — Demo App</title></head>\n" +
+      "<body>\n" +
+      "  <h1>Sign In</h1>\n" +
+      "  <div class=\"error\" id=\"login-error\">Invalid username or password</div>\n" +
+      "  <form id=\"login-form\" action=\"/login\" method=\"POST\">\n" +
+      "    <label for=\"username\">Username</label>\n" +
+      "    <input type=\"text\" id=\"username\" name=\"username\" />\n" +
+      "    <label for=\"password\">Password</label>\n" +
+      "    <input type=\"password\" id=\"password\" name=\"password\" />\n" +
+      "    <button type=\"submit\" id=\"submit-login\">Sign In</button>\n" +
+      "  </form>\n" +
+      "</body>\n" +
+      "</html>\n");
+  }
+}
+
+@dashboard
+fn handle_dashboard(x: Exchange) -> void implements Handler {
+  let tok = get_session_cookie(x.header("Cookie"));
+  let user = "";
+  if (tok != "") {
+    user = x.get("session:" + tok);
+  }
+
+  if (user == "") {
+    x.status(303);
+    x.set_header("Location", "/login");
+    x.send("Redirecting to /login...");
+  } else {
+    let count_str = x.get("counter");
+    if (count_str == "") {
+      count_str = "0";
+    }
+    x.status(200);
+    x.set_header("Content-Type", "text/html; charset=utf-8");
+    x.send("<!DOCTYPE html>\n" +
+      "<html lang=\"en\">\n" +
+      "<head><meta charset=\"utf-8\"><title>Dashboard — Demo App</title></head>\n" +
+      "<body>\n" +
+      "  <h1>Welcome, <span id=\"username-display\">" + user + "</span></h1>\n" +
+      "  <div id=\"counter-value\">" + count_str + "</div>\n" +
+      "  <form id=\"form-inc\" action=\"/click\" method=\"POST\">\n" +
+      "    <button type=\"submit\" id=\"inc\">Increment</button>\n" +
+      "  </form>\n" +
+      "  <form id=\"form-reset\" action=\"/reset\" method=\"POST\">\n" +
+      "    <button type=\"submit\" id=\"reset\">Reset Counter</button>\n" +
+      "  </form>\n" +
+      "  <form id=\"form-logout\" action=\"/logout\" method=\"POST\">\n" +
+      "    <button type=\"submit\" id=\"logout\">Log Out</button>\n" +
+      "  </form>\n" +
+      "</body>\n" +
+      "</html>\n");
+  }
+}
+
+@click
+fn handle_click(x: Exchange) -> void implements Handler {
+  let tok = get_session_cookie(x.header("Cookie"));
+  let user = "";
+  if (tok != "") {
+    user = x.get("session:" + tok);
+  }
+
+  if (user == "") {
+    x.status(401);
+    x.set_header("Content-Type", "text/plain; charset=utf-8");
+    x.send("401 Unauthorized: Session required");
+  } else {
+    let c = 0;
+    let current = x.get("counter");
+    if (current != "") {
+      c = str_to_int(current);
+    }
+    c = c + 1;
+    x.set("counter", str(c));
+    x.status(303);
+    x.set_header("Location", "/dashboard");
+    x.send("Redirecting to /dashboard...");
+  }
+}
+
+@reset
+fn handle_reset(x: Exchange) -> void implements Handler {
+  let tok = get_session_cookie(x.header("Cookie"));
+  let user = "";
+  if (tok != "") {
+    user = x.get("session:" + tok);
+  }
+
+  if (user == "") {
+    x.status(401);
+    x.set_header("Content-Type", "text/plain; charset=utf-8");
+    x.send("401 Unauthorized: Session required");
+  } else {
+    x.set("counter", "0");
+    x.status(303);
+    x.set_header("Location", "/dashboard");
+    x.send("Redirecting to /dashboard...");
+  }
+}
+
+@logout
+fn handle_logout(x: Exchange) -> void implements Handler {
+  let tok = get_session_cookie(x.header("Cookie"));
+  if (tok != "") {
+    x.take("session:" + tok);
+  }
+  x.status(303);
+  x.set_header("Location", "/login");
+  x.set_header("Set-Cookie", "session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax");
+  x.send("Logged out. Redirecting to /login...");
+}
+
+route("GET", "/health", "health");
+route("GET", "/login", "login_page");
+route("POST", "/login", "login_post");
+route("GET", "/dashboard", "dashboard");
+route("POST", "/click", "click");
+route("POST", "/reset", "reset");
+route("POST", "/logout", "logout");
+
+end _lmcode_
+
+let out_path = "build/app.dslb";
+if (ARGV.len() > 0) {
+  out_path = ARGV.get(0, "build/app.dslb");
+}
+let res = run_lmcode(program, {command: ["sh", "-c", "cp \"$1\" \"$2\" && printf \"LMCODE_RETURN_BEGIN\\n{\\\"ok\\\":true,\\\"result\\\":null}\\nLMCODE_RETURN_END\\n\"", "--", "$DSLFILE", out_path]});
+require(res.get("ok", false), "Failed to compile app.dslb");

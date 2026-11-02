@@ -119,7 +119,6 @@ for (j in range(0, ab_h2s.len())) {
 
 report.write_json("work/extracted.json");
 end _lmcode_
-savedsl(p, "work/extract.dslb");
 
 let lmhtml_bin = env("LMHTML", "");
 if (lmhtml_bin != "" && !file_exists(lmhtml_bin)) {
@@ -142,16 +141,15 @@ if (lmhtml_bin == "") {
   exit(1);
 }
 
-let run_res = system([lmhtml_bin, "--lmcode", "work/extract.dslb"]);
-let extract_code = run_res.get("code", -1);
-let extract_timed_out = run_res.get("timed_out", false);
-let extract_stderr = trim(run_res.get("stderr", ""));
+delete_file("work/extracted.json");
+let run_res = run_lmcode(p, {command: ["sh", "-c", "\"$1\" --lmcode \"$2\" >/dev/null && printf \"LMCODE_RETURN_BEGIN\\n{\\\"ok\\\":true,\\\"result\\\":null}\\nLMCODE_RETURN_END\\n\"", "--", lmhtml_bin, "$DSLFILE"]});
+let run_ok = run_res.get("ok", false);
 
 let report_data = {};
 let findings = [];
 let parse_ok = false;
 
-if (extract_code == 0 && !extract_timed_out && file_exists("work/extracted.json")) {
+if (run_ok && file_exists("work/extracted.json")) {
   report_data = json_parse(read_file("work/extracted.json"));
   findings = report_data.get("findings", []);
   if (findings.len() > 0) {
@@ -162,7 +160,7 @@ if (extract_code == 0 && !extract_timed_out && file_exists("work/extracted.json"
 check(parse_ok,
   "lmhtml DOM Extraction",
   parse_ok ? f"extracted {str(findings.len())} structured DOM items"
-           : f"lmhtml exit {str(extract_code)}, timed_out={str(extract_timed_out)}, stderr: {extract_stderr}, items: {str(findings.len())}");
+           : f"run_lmcode ok={str(run_ok)}, error: {json_stringify(run_res)}, items: {str(findings.len())}");
 
 if (!parse_ok) {
   println("==================================================");

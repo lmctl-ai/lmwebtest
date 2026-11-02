@@ -31,3 +31,13 @@ Document titles and primary headings should use exact matching when content is s
 Avoid asserting on dynamic quantities such as search result counts, live citation frequencies, or database update timestamps. These values change as corpus data updates and cause false failures.
 
 Form inputs, action endpoints, and key navigation links should be verified against structural attributes rather than transient DOM positioning. Testing that a search form specifies action /search/ and input name q proves contract compliance regardless of styling updates.
+
+## Offline mock services versus live site integration
+
+Continuous integration pipelines require deterministic tests that execute rapidly on every commit without incurring network flakiness.
+
+Live external websites present risks of intermittent network failures, rate limiting, and uncoordinated upstream deployments. To balance thoroughness with continuous integration stability, the repository separates testing into two tiers.
+
+The offline tier uses lmmock to host an in-process mock web application on loopback. Tests run on every push and pull request, executing in about 1.3 s without external network calls.
+
+The live tier runs against external deployments on scheduled cron jobs and manual dispatch, monitoring real-world service health without disrupting continuous delivery workflows.

@@ -1,0 +1,375 @@
+# webapp.lms - Integration test for mock web application
+# Uses curl for HTTP, lmhtml for RAW HTML DOM extraction,
+# and lmscript to assert stability of authentication, DOM contracts, and stateful buttons.
+
+let base_url = env("LMMOCK_URL", "");
+if (base_url == "") {
+  println("[FAIL] Environment: LMMOCK_URL is not set. Run under lmmock exec or export LMMOCK_URL.");
+  exit(1);
+}
+
+# -----------------------------------------------------------------------------
+# 0. Clean Stale State
+# -----------------------------------------------------------------------------
+mkdir("work");
+delete_file("work/login.html");
+delete_file("work/login_failed.html");
+delete_file("work/dashboard.html");
+delete_file("work/login_extracted.json");
+delete_file("work/login_failed_extracted.json");
+delete_file("work/dashboard_extracted.json");
+delete_file("work/cookies.txt");
+delete_file("work/cookies_bad.txt");
+delete_file("work/extract_login.dslb");
+delete_file("work/extract_error.dslb");
+delete_file("work/extract_dash.dslb");
+
+let stats = {pass: 0, fail: 0};
+
+fn check(condition, name, detail) {
+  if (condition) {
+    stats["pass"] = stats.get("pass", 0) + 1;
+    println(f"[PASS] {name}: {detail}");
+  } else {
+    stats["fail"] = stats.get("fail", 0) + 1;
+    println(f"[FAIL] {name}: {detail}");
+  }
+}
+
+# -----------------------------------------------------------------------------
+# 1. Resolve lmhtml host binary
+# -----------------------------------------------------------------------------
+let lmhtml_bin = env("LMHTML", "");
+if (lmhtml_bin != "" && !file_exists(lmhtml_bin)) {
+  lmhtml_bin = "";
+}
+if (lmhtml_bin == "") {
+  let found = which("lmhtml");
+  if (found != null) {
+    lmhtml_bin = found;
+  }
+}
+if (lmhtml_bin == "" && file_exists("../bin/lmhtml")) {
+  lmhtml_bin = "../bin/lmhtml";
+}
+if (lmhtml_bin == "" && file_exists("bin/lmhtml")) {
+  lmhtml_bin = "bin/lmhtml";
+}
+if (lmhtml_bin == "") {
+  check(false,
+    "lmhtml Host Resolution",
+    "lmhtml binary not found on PATH and LMHTML is not set to an executable path");
+  println("==================================================");
+  println(f"Test Aborted Early: {str(stats.get('pass', 0))} passed, {str(stats.get('fail', 0))} failed during DOM extraction");
+  println("==================================================");
+  exit(1);
+}
+
+# -----------------------------------------------------------------------------
+# 2. Compile DOM extraction DSL bytecode programs
+# -----------------------------------------------------------------------------
+p_login = _lmcode_ cli="lmhtml" install="github:lmctl-ai/lmhtml@latest";
+let doc1 = html.load("work/login.html");
+report.add("login_title", "login.html", 0, doc1.title());
+let forms1 = doc1.select("form");
+if (forms1.len() > 0) {
+  let f1 = forms1.at(0);
+  report.add("form_action", "login.html", 0, f1.attr("action"));
+  report.add("form_method", "login.html", 0, f1.attr("method"));
+}
+let inputs1 = doc1.select("input");
+for (i in range(0, inputs1.len())) {
+  report.add("input_name", "login.html", 0, inputs1.at(i).attr("name"));
+}
+let btns1 = doc1.select("button");
+for (j in range(0, btns1.len())) {
+  report.add("button_id", "login.html", 0, btns1.at(j).attr("id"));
+}
+report.write_json("work/login_extracted.json");
+end _lmcode_
+
+p_error = _lmcode_ cli="lmhtml" install="github:lmctl-ai/lmhtml@latest";
+let doc2 = html.load("work/login_failed.html");
+report.add("error_title", "login_failed.html", 0, doc2.title());
+let errs = doc2.select("#login-error");
+if (errs.len() > 0) {
+  report.add("error_message", "login_failed.html", 0, errs.at(0).text());
+}
+report.write_json("work/login_failed_extracted.json");
+end _lmcode_
+
+p_dash = _lmcode_ cli="lmhtml" install="github:lmctl-ai/lmhtml@latest";
+let doc3 = html.load("work/dashboard.html");
+report.add("dash_title", "dashboard.html", 0, doc3.title());
+let users = doc3.select("#username-display");
+if (users.len() > 0) {
+  report.add("username", "dashboard.html", 0, users.at(0).text());
+}
+let counters = doc3.select("#counter-value");
+if (counters.len() > 0) {
+  report.add("counter", "dashboard.html", 0, counters.at(0).text());
+}
+let forms3 = doc3.select("form");
+for (k in range(0, forms3.len())) {
+  let f = forms3.at(k);
+  let act = f.attr("action");
+  let btns = f.select("button");
+  let bid = "";
+  if (btns.len() > 0) { bid = btns.at(0).attr("id"); }
+  report.add("action:" + bid, "dashboard.html", 0, act);
+  report.add("button:" + bid, "dashboard.html", 0, bid);
+}
+report.write_json("work/dashboard_extracted.json");
+end _lmcode_
+
+fn extract_dom(prog, json_path) {
+  delete_file(json_path);
+  let res = run_lmcode(prog, {command: ["sh", "-c", "\"$1\" --lmcode \"$2\" >/dev/null && printf \"LMCODE_RETURN_BEGIN\\n{\\\"ok\\\":true,\\\"result\\\":null}\\nLMCODE_RETURN_END\\n\"", "--", lmhtml_bin, "$DSLFILE"]});
+  let ok = res.get("ok", false);
+  if (ok && file_exists(json_path)) {
+    let data = json_parse(read_file(json_path));
+    return data.get("findings", []);
+  }
+  return [];
+}
+
+fn get_finding(findings, kind, fallback) {
+  for (f_idx in range(0, findings.len())) {
+    let f = findings.get(f_idx, {});
+    if (f.get("kind", "") == kind) {
+      return f.get("message", fallback);
+    }
+  }
+  return fallback;
+}
+
+fn get_all_findings(findings, kind) {
+  let list = [];
+  for (f_idx in range(0, findings.len())) {
+    let f = findings.get(f_idx, {});
+    if (f.get("kind", "") == kind) {
+      push(list, f.get("message", ""));
+    }
+  }
+  return list;
+}
+
+# -----------------------------------------------------------------------------
+# 3. Health Check
+# -----------------------------------------------------------------------------
+let health_res = system(["curl", "-fsSL", "--max-time", "10", "-w", "%{http_code}", base_url + "/health", "-o", "/dev/null"]);
+let health_code = trim(health_res.get("stdout", ""));
+let health_exit = health_res.get("code", -1);
+let health_ok = health_exit == 0 && health_code == "200";
+check(health_ok, "Health Check", health_ok ? "HTTP 200 OK" : f"expected HTTP 200, got {health_code} (exit {str(health_exit)})");
+
+# -----------------------------------------------------------------------------
+# 4. Unauthenticated Protection: GET /dashboard redirects to /login
+# -----------------------------------------------------------------------------
+let unauth_res = system(["curl", "-s", "-I", "--max-time", "10", "-w", "%{http_code} %{redirect_url}", base_url + "/dashboard", "-o", "/dev/null"]);
+let unauth_parts = split(trim(unauth_res.get("stdout", "")), " ");
+let unauth_code = unauth_parts.get(0, "");
+let unauth_redir = unauth_parts.get(1, "");
+let unauth_ok = unauth_res.get("code", -1) == 0 && unauth_code == "303" && contains(unauth_redir, "/login");
+check(unauth_ok,
+  "Unauthenticated Dashboard Protection",
+  unauth_ok ? f"HTTP {unauth_code} -> {unauth_redir}" : f"expected HTTP 303 to /login, got HTTP {unauth_code} -> {unauth_redir}");
+
+# -----------------------------------------------------------------------------
+# 5. Capture & Extract Login Page DOM
+# -----------------------------------------------------------------------------
+let fetch_login = system(["curl", "-fsSL", "--max-time", "10", "-w", "%{http_code}", base_url + "/login", "-o", "work/login.html"]);
+let login_captured = fetch_login.get("code", -1) == 0 && trim(fetch_login.get("stdout", "")) == "200" && file_exists("work/login.html");
+check(login_captured, "Login Page HTML Capture", login_captured ? "HTTP 200 saved to work/login.html" : "failed to fetch /login");
+
+if (!login_captured) {
+  println("==================================================");
+  println(f"Test Aborted Early: {str(stats.get('pass', 0))} passed, {str(stats.get('fail', 0))} failed during login capture");
+  println("==================================================");
+  exit(1);
+}
+
+let login_findings = extract_dom(p_login, "work/login_extracted.json");
+let login_extracted = login_findings.len() > 0;
+check(login_extracted, "Login Page DOM Extraction", login_extracted ? f"extracted {str(login_findings.len())} items" : "failed to extract login DOM items");
+
+let login_title = get_finding(login_findings, "login_title", "");
+let title_ok = login_title == "Sign In — Demo App";
+check(title_ok, "Login Page Title", title_ok ? f"'{login_title}' matches" : f"expected 'Sign In — Demo App', got '{login_title}'");
+
+let login_action = get_finding(login_findings, "form_action", "");
+let login_method = get_finding(login_findings, "form_method", "");
+let form_ok = login_action == "/login" && login_method == "POST";
+check(form_ok, "Login Form Action & Method", form_ok ? f"action='{login_action}', method='{login_method}'" : f"expected action='/login', method='POST', got '{login_action}'/'{login_method}'");
+
+let input_names = get_all_findings(login_findings, "input_name");
+let inputs_ok = contains(input_names, "username") && contains(input_names, "password");
+check(inputs_ok, "Login Form Inputs", inputs_ok ? f"inputs: {join(input_names, ', ')}" : f"missing expected inputs in {join(input_names, ', ')}");
+
+let submit_btn = get_finding(login_findings, "button_id", "");
+let btn_ok = submit_btn == "submit-login";
+check(btn_ok, "Login Submit Button", btn_ok ? f"button id='{submit_btn}'" : f"expected button id='submit-login', got '{submit_btn}'");
+
+# -----------------------------------------------------------------------------
+# 6. Deliberately-Negative Login: Wrong credentials -> 401 + error element
+# Driven via extracted form action!
+# -----------------------------------------------------------------------------
+let bad_post = system(["curl", "-s", "--max-time", "10", "-w", "%{http_code}", "-d", "username=demo&password=wrong-password", base_url + login_action, "-o", "work/login_failed.html", "-c", "work/cookies_bad.txt"]);
+let bad_code = trim(bad_post.get("stdout", ""));
+let bad_exit = bad_post.get("code", -1);
+let bad_ok = bad_exit == 0 && bad_code == "401" && file_exists("work/login_failed.html");
+check(bad_ok, "Invalid Credentials HTTP Status", bad_ok ? f"HTTP {bad_code} Unauthorized" : f"expected HTTP 401, got {bad_code} (exit {str(bad_exit)})");
+
+let err_findings = extract_dom(p_error, "work/login_failed_extracted.json");
+let err_title = get_finding(err_findings, "error_title", "");
+let err_msg = get_finding(err_findings, "error_message", "");
+let err_dom_ok = err_title == "Login Failed — Demo App" && err_msg == "Invalid username or password";
+check(err_dom_ok, "Invalid Credentials DOM Error Element", err_dom_ok ? f"error message='{err_msg}'" : f"expected error 'Invalid username or password', got '{err_msg}'");
+
+let bad_cookies = read_file("work/cookies_bad.txt");
+let no_session_ok = !contains(bad_cookies, "session");
+check(no_session_ok, "Invalid Credentials Cookie Rejection", no_session_ok ? "no session cookie issued" : "session cookie unexpectedly issued");
+
+# -----------------------------------------------------------------------------
+# 7. Valid Login: Credentials -> 303 + Set-Cookie -> Dashboard
+# Driven via extracted form action!
+# -----------------------------------------------------------------------------
+let good_post = system(["curl", "-s", "--max-time", "10", "-w", "%{http_code} %{redirect_url}", "-d", "username=demo&password=demo-pass", base_url + login_action, "-c", "work/cookies.txt", "-o", "/dev/null"]);
+let good_parts = split(trim(good_post.get("stdout", "")), " ");
+let good_code = good_parts.get(0, "");
+let good_redir = good_parts.get(1, "");
+let good_cookies = "";
+if (file_exists("work/cookies.txt")) {
+  good_cookies = read_file("work/cookies.txt");
+}
+let login_success = good_post.get("code", -1) == 0 && good_code == "303" && contains(good_redir, "/dashboard") && contains(good_cookies, "session");
+check(login_success, "Valid Login Authentication", login_success ? f"HTTP {good_code} -> {good_redir} with session cookie" : f"expected HTTP 303 to /dashboard with cookie, got HTTP {good_code} -> {good_redir}");
+
+if (!login_success) {
+  println("==================================================");
+  println(f"Test Aborted Early: {str(stats.get('pass', 0))} passed, {str(stats.get('fail', 0))} failed during authentication");
+  println("==================================================");
+  exit(1);
+}
+
+# -----------------------------------------------------------------------------
+# 8. Authenticated Dashboard DOM Contract
+# -----------------------------------------------------------------------------
+let fetch_dash = system(["curl", "-fsSL", "--max-time", "10", "-w", "%{http_code}", base_url + "/dashboard", "-b", "work/cookies.txt", "-o", "work/dashboard.html"]);
+let dash_fetched = fetch_dash.get("code", -1) == 0 && trim(fetch_dash.get("stdout", "")) == "200" && file_exists("work/dashboard.html");
+check(dash_fetched, "Dashboard HTML Capture", dash_fetched ? "HTTP 200 saved to work/dashboard.html" : "failed to fetch /dashboard");
+
+let dash_findings = extract_dom(p_dash, "work/dashboard_extracted.json");
+let dash_title = get_finding(dash_findings, "dash_title", "");
+let dash_title_ok = dash_title == "Dashboard — Demo App";
+check(dash_title_ok, "Dashboard Title", dash_title_ok ? f"'{dash_title}' matches" : f"expected 'Dashboard — Demo App', got '{dash_title}'");
+
+let user_disp = get_finding(dash_findings, "username", "");
+let user_ok = user_disp == "demo";
+check(user_ok, "Dashboard Username Display", user_ok ? f"user='{user_disp}'" : f"expected user='demo', got '{user_disp}'");
+
+let inc_action = get_finding(dash_findings, "action:inc", "");
+let inc_btn = get_finding(dash_findings, "button:inc", "");
+let reset_action = get_finding(dash_findings, "action:reset", "");
+let reset_btn = get_finding(dash_findings, "button:reset", "");
+let logout_action = get_finding(dash_findings, "action:logout", "");
+let logout_btn = get_finding(dash_findings, "button:logout", "");
+
+let buttons_ok = inc_btn == "inc" && inc_action == "/click" &&
+                 reset_btn == "reset" && reset_action == "/reset" &&
+                 logout_btn == "logout" && logout_action == "/logout";
+check(buttons_ok, "Dashboard Actions & Buttons Discovery", buttons_ok ? "discovered inc, reset, logout form actions and button IDs" : f"actions: inc={inc_action}, reset={reset_action}, logout={logout_action}");
+
+# -----------------------------------------------------------------------------
+# 9. State-Order Independence: Initial Reset to 0
+# Driven via extracted reset action!
+# -----------------------------------------------------------------------------
+let init_reset = system(["curl", "-s", "-X", "POST", "--max-time", "10", "-w", "%{http_code}", base_url + reset_action, "-b", "work/cookies.txt", "-o", "/dev/null"]);
+let reset_redir_ok = trim(init_reset.get("stdout", "")) == "303";
+system(["curl", "-fsSL", "--max-time", "10", base_url + "/dashboard", "-b", "work/cookies.txt", "-o", "work/dashboard.html"]);
+let c0_findings = extract_dom(p_dash, "work/dashboard_extracted.json");
+let c0 = get_finding(c0_findings, "counter", "");
+let c0_ok = reset_redir_ok && c0 == "0";
+check(c0_ok, "State Reset (Initial Counter == 0)", c0_ok ? "counter initialized to 0" : f"expected counter=0, got counter='{c0}'");
+
+# -----------------------------------------------------------------------------
+# 10. Click Increment Button N times (DOM read after each click)
+# Driven via extracted inc action!
+# -----------------------------------------------------------------------------
+let click_target = 3;
+let all_clicks_ok = true;
+for (step in range(1, click_target + 1)) {
+  let click_res = system(["curl", "-s", "-X", "POST", "--max-time", "10", "-w", "%{http_code}", base_url + inc_action, "-b", "work/cookies.txt", "-o", "/dev/null"]);
+  let c_code = trim(click_res.get("stdout", ""));
+  system(["curl", "-fsSL", "--max-time", "10", base_url + "/dashboard", "-b", "work/cookies.txt", "-o", "work/dashboard.html"]);
+  let step_findings = extract_dom(p_dash, "work/dashboard_extracted.json");
+  let step_val = get_finding(step_findings, "counter", "");
+  let step_ok = c_code == "303" && step_val == str(step);
+  check(step_ok, f"Click #{str(step)}", step_ok ? f"counter incremented to {step_val}" : f"expected counter={str(step)}, got '{step_val}' (POST status {c_code})");
+  if (!step_ok) {
+    all_clicks_ok = false;
+  }
+}
+
+# -----------------------------------------------------------------------------
+# 11. Click Reset Button -> Counter resets to 0
+# Driven via extracted reset action!
+# -----------------------------------------------------------------------------
+let post_reset = system(["curl", "-s", "-X", "POST", "--max-time", "10", "-w", "%{http_code}", base_url + reset_action, "-b", "work/cookies.txt", "-o", "/dev/null"]);
+let post_reset_code = trim(post_reset.get("stdout", ""));
+system(["curl", "-fsSL", "--max-time", "10", base_url + "/dashboard", "-b", "work/cookies.txt", "-o", "work/dashboard.html"]);
+let cr_findings = extract_dom(p_dash, "work/dashboard_extracted.json");
+let cr = get_finding(cr_findings, "counter", "");
+let reset_ok = post_reset_code == "303" && cr == "0";
+check(reset_ok, "Reset Button Click", reset_ok ? "counter reset back to 0" : f"expected counter=0, got '{cr}' (POST status {post_reset_code})");
+
+# -----------------------------------------------------------------------------
+# 12. Negative Auth Checks on Action Endpoints
+# -----------------------------------------------------------------------------
+let click_unauth = system(["curl", "-s", "-X", "POST", "--max-time", "10", "-w", "%{http_code}", base_url + inc_action, "-o", "/dev/null"]);
+let click_unauth_code = trim(click_unauth.get("stdout", ""));
+let click_unauth_ok = click_unauth_code == "401";
+check(click_unauth_ok, "Unauthenticated /click Rejection", click_unauth_ok ? "HTTP 401 Unauthorized" : f"expected HTTP 401, got {click_unauth_code}");
+
+let reset_unauth = system(["curl", "-s", "-X", "POST", "--max-time", "10", "-w", "%{http_code}", base_url + reset_action, "-o", "/dev/null"]);
+let reset_unauth_code = trim(reset_unauth.get("stdout", ""));
+let reset_unauth_ok = reset_unauth_code == "401";
+check(reset_unauth_ok, "Unauthenticated /reset Rejection", reset_unauth_ok ? "HTTP 401 Unauthorized" : f"expected HTTP 401, got {reset_unauth_code}");
+
+# -----------------------------------------------------------------------------
+# 13. Logout & Invalidation
+# Driven via extracted logout action!
+# -----------------------------------------------------------------------------
+let logout_post = system(["curl", "-s", "-I", "-X", "POST", "--max-time", "10", "-w", "%{http_code} %{redirect_url}", base_url + logout_action, "-b", "work/cookies.txt", "-c", "work/cookies.txt", "-o", "/dev/null"]);
+let logout_parts = split(trim(logout_post.get("stdout", "")), " ");
+let logout_code = logout_parts.get(0, "");
+let logout_redir = logout_parts.get(1, "");
+let logout_ok = logout_code == "303" && contains(logout_redir, "/login");
+check(logout_ok, "Logout Action", logout_ok ? f"HTTP {logout_code} -> {logout_redir}" : f"expected HTTP 303 to /login, got HTTP {logout_code} -> {logout_redir}");
+
+let post_logout_dash = system(["curl", "-s", "-I", "--max-time", "10", "-w", "%{http_code} %{redirect_url}", base_url + "/dashboard", "-b", "work/cookies.txt", "-o", "/dev/null"]);
+let post_dash_parts = split(trim(post_logout_dash.get("stdout", "")), " ");
+let post_dash_code = post_dash_parts.get(0, "");
+let post_dash_redir = post_dash_parts.get(1, "");
+let post_dash_ok = post_dash_code == "303" && contains(post_dash_redir, "/login");
+check(post_dash_ok, "Post-Logout Dashboard Protection", post_dash_ok ? f"HTTP {post_dash_code} -> {post_dash_redir}" : f"expected HTTP 303 to /login, got HTTP {post_dash_code} -> {post_dash_redir}");
+
+let post_logout_click = system(["curl", "-s", "-X", "POST", "--max-time", "10", "-w", "%{http_code}", base_url + inc_action, "-b", "work/cookies.txt", "-o", "/dev/null"]);
+let post_click_code = trim(post_logout_click.get("stdout", ""));
+let post_click_ok = post_click_code == "401";
+check(post_click_ok, "Post-Logout Click Rejection", post_click_ok ? "HTTP 401 Unauthorized" : f"expected HTTP 401, got {post_click_code}");
+
+# -----------------------------------------------------------------------------
+# Summary and Exit
+# -----------------------------------------------------------------------------
+let total_passed = stats.get("pass", 0);
+let total_failed = stats.get("fail", 0);
+println("==================================================");
+println(f"Test Summary: {str(total_passed)} passed, {str(total_failed)} failed");
+println("==================================================");
+
+if (total_failed > 0) {
+  exit(1);
+} else {
+  exit(0);
+}

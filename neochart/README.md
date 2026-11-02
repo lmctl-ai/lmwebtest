@@ -100,11 +100,11 @@ To launch `playwright-cli` and inspect the site interactively:
 
 ---
 
-## Tool Limitation: `savedsl` vs `run_lmcode`
+## Execution Architecture: `run_lmcode` and Dynamic Hosts
 
-In `lmscript 0.2.446`, `run_lmcode` is not available (calling it results in an undefined function error). Instead, `savedsl(program, path)` plus `--lmcode` is used. The script compiles the `_lmcode_` block to `work/extract.dslb` via `savedsl` and invokes `lmhtml` via `system([lmhtml_bin, "--lmcode", ...])` to extract structured JSON to `work/extracted.json`.
+The test uses latest dependencies by design (latest, by design; breakage is fixed forward). In `lmscript`, `_lmcode_` blocks are executed explicitly via `run_lmcode(program, options)`. The runner executes `lmhtml` with `--lmcode` passing the owned temporary bytecode file and writes structured DOM extraction findings to `work/extracted.json`.
 
-Furthermore, published `lmhtml` release `v0.7.4` reads DSL bytecode version 5, whereas `lmscript 0.2.446` emits DSL bytecode version 6. Because of this bytecode mismatch, `run.sh` builds `lmhtml` from pinned commit `bb8bc196f46400c7a54018be9efb310b91cb8e28`, which supports DSL version 6 and the `--lmcode` CLI flags.
+Host resolution is fully dynamic: `run.sh` locates or downloads the latest `lmhtml` binary, verifying compatibility with the installed `lmscript` bytecode version (falling back to building from git `main` HEAD when published releases target an older bytecode format).
 
 ---
 
