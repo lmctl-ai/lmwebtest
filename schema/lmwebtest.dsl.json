@@ -1,0 +1,177 @@
+{
+  "dsl.schema": 2,
+  "name": "lmwebtest",
+  "types": {
+    "Web": {
+      "methods": {
+        "navigate": [
+          { "params": ["string"], "returns": "Page" },
+          { "params": ["string", "int"], "returns": "Page" }
+        ],
+        "set_timeout": [
+          { "params": ["int"], "returns": "void" }
+        ],
+        "set_viewport": [
+          { "params": ["int", "int"], "returns": "void" }
+        ],
+        "set_user_agent": [
+          { "params": ["string"], "returns": "void" }
+        ],
+        "set_header": [
+          { "params": ["string", "string"], "returns": "void" }
+        ],
+        "close": [
+          { "params": [], "returns": "void" }
+        ]
+      }
+    },
+    "Page": {
+      "methods": {
+        "url": [
+          { "params": [], "returns": "string" }
+        ],
+        "title": [
+          { "params": [], "returns": "string" }
+        ],
+        "status": [
+          { "params": [], "returns": "int" }
+        ],
+        "html": [
+          { "params": [], "returns": "string" },
+          { "params": ["string"], "returns": "string" }
+        ],
+        "save_html": [
+          { "params": ["string"], "returns": "void" }
+        ],
+        "screenshot": [
+          { "params": ["string"], "returns": "void" },
+          { "params": ["string", "bool"], "returns": "void" }
+        ],
+        "wait_for": [
+          { "params": ["string"], "returns": "Element" },
+          { "params": ["string", "int"], "returns": "Element" }
+        ],
+        "wait_for_timeout": [
+          { "params": ["int"], "returns": "void" }
+        ],
+        "wait_for_load": [
+          { "params": [], "returns": "void" }
+        ],
+        "select": [
+          { "params": ["string"], "returns": "ElementList" }
+        ],
+        "select_one": [
+          { "params": ["string"], "returns": "Element" }
+        ],
+        "has": [
+          { "params": ["string"], "returns": "bool" }
+        ],
+        "count": [
+          { "params": ["string"], "returns": "int" }
+        ],
+        "text": [
+          { "params": ["string"], "returns": "string" }
+        ],
+        "inner_html": [
+          { "params": ["string"], "returns": "string" }
+        ],
+        "outer_html": [
+          { "params": ["string"], "returns": "string" }
+        ],
+        "click": [
+          { "params": ["string"], "returns": "void" }
+        ],
+        "fill": [
+          { "params": ["string", "string"], "returns": "void" }
+        ],
+        "press": [
+          { "params": ["string", "string"], "returns": "void" }
+        ],
+        "eval": [
+          { "params": ["string"], "returns": "string" }
+        ]
+      }
+    },
+    "Element": {
+      "methods": {
+        "text": [
+          { "params": [], "returns": "string" }
+        ],
+        "inner_html": [
+          { "params": [], "returns": "string" }
+        ],
+        "outer_html": [
+          { "params": [], "returns": "string" }
+        ],
+        "attr": [
+          { "params": ["string"], "returns": "string" }
+        ],
+        "has_attr": [
+          { "params": ["string"], "returns": "bool" }
+        ],
+        "is_visible": [
+          { "params": [], "returns": "bool" }
+        ],
+        "click": [
+          { "params": [], "returns": "void" }
+        ],
+        "fill": [
+          { "params": ["string"], "returns": "void" }
+        ],
+        "press": [
+          { "params": ["string"], "returns": "void" }
+        ],
+        "select": [
+          { "params": ["string"], "returns": "ElementList" }
+        ],
+        "select_one": [
+          { "params": ["string"], "returns": "Element" }
+        ],
+        "count": [
+          { "params": ["string"], "returns": "int" }
+        ]
+      }
+    },
+    "ElementList": {
+      "methods": {
+        "len": [
+          { "params": [], "returns": "int" }
+        ],
+        "at": [
+          { "params": ["int"], "returns": "Element" }
+        ],
+        "texts": [
+          { "params": [], "returns": "StrList" }
+        ]
+      }
+    },
+    "Report": {
+      "methods": {
+        "add": [
+          { "params": ["string", "string", "int", "string"], "returns": "void" }
+        ],
+        "fail_if_any": [
+          { "params": [], "returns": "void" }
+        ],
+        "write_json": [
+          { "params": ["string"], "returns": "void" }
+        ],
+        "write_text": [
+          { "params": ["string"], "returns": "void" }
+        ]
+      }
+    }
+  },
+  "functions": {
+    "print": [
+      { "params": ["string"], "returns": "void" }
+    ],
+    "assert_close": [
+      { "params": ["float", "float", "float"], "returns": "void" }
+    ]
+  },
+  "context": {
+    "web": "Web",
+    "report": "Report"
+  }
+}

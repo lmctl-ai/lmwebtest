@@ -1,0 +1,76 @@
+# moonshot-pricing.lms
+# Acquires client-rendered Moonshot batch pricing table for lmprice consumption.
+# Demonstrates:
+# 1. Multi-step browser automation with lmwebtest DSL (render client-side table)
+# 2. Extracting structured rows directly in LMScript
+# 3. Saving rendered DOM HTML for downstream consumption / lmhtml parsing
+
+mkdir("test-results");
+
+let out_html = "test-results/moonshot-batch-pricing.html";
+
+println("1. Rendering Moonshot pricing page with lmwebtest...");
+
+let test_dsl = _lmcode_ cli="lmwebtest" install="github:lmctl-ai/lmwebtest@latest";
+let page = web.navigate("https://platform.kimi.ai/docs/pricing/batch");
+page.wait_for("table tbody tr", 15000);
+
+let title = page.title();
+print("Title: " + title);
+
+let count = page.count("table tbody tr");
+print("Pricing rows found: " + str(count));
+
+if (count == 0) {
+  report.add("empty_table", "table tbody tr", 1, "Expected client-rendered pricing rows, got 0");
+  report.fail_if_any();
+}
+
+let rows = page.select("table tbody tr");
+for (i in range(0, rows.len())) {
+  let row = rows.at(i);
+  let text = row.text();
+  print("  [" + str(i) + "] " + text);
+}
+
+page.save_html("test-results/moonshot-batch-pricing.html");
+print("Saved rendered HTML to test-results/moonshot-batch-pricing.html");
+end _lmcode_
+
+let tmp = temp_file();
+savedsl(test_dsl, tmp);
+let res = system(concat(dsl_cli(test_dsl), ["--dsl", tmp]));
+delete_file(tmp);
+
+if (res.code != 0) {
+  println("ERROR: lmwebtest failed with exit code " + str(res.code));
+  println(res.stderr);
+  println(res.stdout);
+  exit(res.code);
+}
+
+println(res.stdout);
+
+println("2. Verifying rendered HTML exists and contains data rows...");
+let html_content = read_file(out_html);
+require(contains(html_content, "kimi-"), "HTML must contain kimi model names");
+println("HTML verified: size = " + str(len(html_content)) + " bytes");
+
+println("3. Composing with lmhtml: parsing rendered table with lmhtml...");
+let parse_dsl = _lmcode_ cli="lmhtml" install="github:lmctl-ai/lmhtml@latest";
+let doc = html.load("test-results/moonshot-batch-pricing.html");
+let table_rows = doc.select("table tbody tr");
+print("lmhtml verified row count: " + str(table_rows.len()));
+for (i in range(0, table_rows.len())) {
+  let r = table_rows.at(i);
+  print("  lmhtml row " + str(i) + ": " + r.text());
+}
+end _lmcode_
+
+let parse_tmp = temp_file();
+savedsl(parse_dsl, parse_tmp);
+let parse_res = system(concat(dsl_cli(parse_dsl), ["--dsl", parse_tmp]));
+delete_file(parse_tmp);
+println(parse_res.stdout);
+
+println("Successfully acquired Moonshot client-rendered pricing table!");

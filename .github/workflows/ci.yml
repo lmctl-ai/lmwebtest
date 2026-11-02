@@ -2,8 +2,9 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
+    branches: [main, master]
   workflow_dispatch:
   schedule:
     - cron: '0 6 * * 1'
@@ -16,6 +17,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: ubuntu-test
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: setup node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - name: install lmscript
+        run: npm install -g @lmctl-ai/lmctl@0.2.426
+
+      - name: install dependencies
+        run: npm ci
+
+      - name: link lmwebtest
+        run: npm link
+
+      - name: install playwright browsers
+        run: npm run browsers:install
+
+      - name: run syntax check
+        run: npm run check
+
+      - name: run test suite
+        run: npm test
+
+      - name: run worked example
+        run: lmscript examples/moonshot-pricing.lms
+
   webapp:
     name: webapp-offline
     runs-on: ubuntu-latest

@@ -1,17 +1,25 @@
-# Working state and captures
+node_modules/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+docroot/
+screenshots/
+.omx/
+*.log
+*.lmctl
+.lmctl/
+.cli-fixture-*/
+dist/
+sites/lmdiff/
 work/
 .playwright-cli/
 build*/
 bin/
 .bin/
-
-# Compiled bytecode and teamfiles
 *.dslb
 *.lmc
 p1.txt
-
-# Separate dev checkouts and environments
 /lmhtml/
-node_modules/
 .env
 .DS_Store

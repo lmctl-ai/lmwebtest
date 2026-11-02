@@ -1,82 +1,124 @@
 # lmwebtest
 
-Web integration test suite powered by `playwright-cli`, `lmscript`, and `lmhtml`.
+Web integration test suite and browser automation host powered by `lmwebtest`, `lmcurl`, `lmscript`, and `lmhtml`.
 
 [![CI](https://github.com/lmctl-ai/lmwebtest/actions/workflows/ci.yml/badge.svg)](https://github.com/lmctl-ai/lmwebtest/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-`lmwebtest` provides repeatable, CLI-friendly integration testing for web sites and documentation libraries without heavy browser automation test runners.
-
 ## Architecture
 
-The testing workflow separates responsibilities into three distinct tools:
+The workflow separates **navigation and download** from **extraction** from **orchestration**. Navigation has two interchangeable implementations — pick the cheaper one that works:
 
-1. **`playwright-cli`**: Interactive, ad-hoc site exploration to discover pages, selectors, navigation flows, and dynamic client-side behaviors.
-2. **`lmscript`**: Automation engine driving test execution, network fetching, assertion evaluation, and structured PASS/FAIL reporting.
-3. **`lmhtml`**: High-performance C++/Lexbor DOM host that parses raw captured HTML and extracts structured DOM elements (titles, headings, links, forms) via DSL bytecode.
+| Role | Tool | DSL / Interface |
+|---|---|---|
+| Navigation + download, **HTTP** | **`lmcurl`** | `context curl: Curl` |
+| Navigation + download, **Browser** | **`lmwebtest`** | `context web: Web` (Playwright Chromium) |
+| **Extraction** | **`lmhtml`** | `context html: Html` (Lexbor DOM) |
+| **Orchestration** | **`lmscript`** | `.lms` |
+
+One `.lms` can hold both acquisition branches: try HTTP first, fall back to the browser only when the data is not in the fetched document. Keep the fallback a declared branch with an explicit condition — not a retry loop — so the script stays deterministic.
 
 ```
                      ┌──────────────────┐
-                     │  playwright-cli  │  (Ad-hoc exploration, selector discovery)
+                     │    Target Site   │
                      └────────┬─────────┘
-                              │ findings
+                              │
+               ┌──────────────┴──────────────┐
+               │                             │
+        (static / HTTP)            (client-rendered JS)
+               ▼                             ▼
+       ┌──────────────┐              ┌──────────────┐
+       │    lmcurl    │              │  lmwebtest   │
+       │ (Curl DSL)   │              │  (Web DSL)   │
+       └───────┬──────┘              └───────┬──────┘
+               │                             │
+               └──────────────┬──────────────┘
                               ▼
-┌──────────────┐      ┌──────────────────┐      ┌──────────────────┐
-│  Target Site ├─────►│  Test Script     ├─────►│  Raw HTML Files  │
-└──────────────┘ curl └────────┬─────────┘ save └────────┬─────────┘
-                               │                         │
-                               │ compiles _lmcode_       │ Lexbor parse
-                               ▼                         ▼
-                      ┌──────────────────┐      ┌──────────────────┐
-                      │ DSL Bytecode     ├─────►│      lmhtml      │
-                      └──────────────────┘ exec └────────┬─────────┘
-                                                         │
-                                                         ▼
-                                                ┌──────────────────┐
-                                                │  Structured JSON │
-                                                └────────┬─────────┘
-                                                         │
-                                                         ▼
-                                                ┌──────────────────┐
-                                                │ PASS/FAIL Checks │
-                                                └──────────────────┘
+                      Raw Rendered DOM
+                              ▼
+                     ┌──────────────────┐
+                     │      lmhtml      │  (Lexbor DOM extraction)
+                     └────────┬─────────┘
+                              ▼
+                     ┌──────────────────┐
+                     │     lmscript     │  (Assertions & reporting)
+                     └──────────────────┘
 ```
 
-## Quick Start
+## LMScript DSL (`context web: Web`)
 
-Run all test suites via the top-level runner:
+`lmwebtest` exposes a DSL surface matching `lmhtml` conventions (`context web: Web` and `context report: Report`) so an `.lms` script can drive multi-step browser flows directly:
 
-```bash
-./run.sh
+```lmscript
+let test_dsl = _lmcode_ cli="lmwebtest" install="github:lmctl-ai/lmwebtest@latest";
+let page = web.navigate("https://platform.kimi.ai/docs/pricing/batch");
+page.wait_for("table tbody tr", 15000);
+
+let count = page.count("table tbody tr");
+if (count == 0) {
+  report.add("empty_table", "table tbody tr", 1, "Expected client-rendered pricing rows");
+  report.fail_if_any();
+}
+
+let rows = page.select("table tbody tr");
+for (i in range(0, rows.len())) {
+  let row = rows.at(i);
+  print("[" + str(i) + "] " + row.text());
+}
+
+page.save_html("test-results/rendered.html");
+end _lmcode_
 ```
 
-Or run individual suites:
+See [examples/moonshot-pricing.lms](examples/moonshot-pricing.lms) for an end-to-end example acquiring client-rendered pricing tables and handing them to `lmhtml`.
 
-```bash
-# Offline deterministic mock web application suite
-cd demo-app && ./run.sh
+## Installation
 
-# Live neochart site suite
-cd neochart && ./run.sh
+Install via `lmscript` (requires Node.js >= 20 on PATH; downloads self-contained bundle into tool cache):
+
+```sh
+lmscript install github:lmctl-ai/lmwebtest
 ```
 
-To run interactive site exploration with `playwright-cli`:
-
-```bash
-cd neochart
-./run.sh --explore
+Playwright Chromium browser binaries are installed into `~/.cache/ms-playwright` via:
+```sh
+npx playwright install chromium
 ```
 
-## Test Suites
+Or run locally from checkout:
 
-- **[demo-app](demo-app/)**: Deterministic, fully offline integration test suite for an interactive mock web application running on `lmmock` loopback. Exercises session cookie authentication, route protection, stateful button clicks, and DOM-driven form interactions via `lmhtml`. Executed in CI on every push and pull request.
-- **[neochart](neochart/)**: Integration test suite for [neochart.com](https://neochart.com) (legal document library). Includes ad-hoc exploration notes ([EXPLORE.md](neochart/EXPLORE.md)), the test script ([neochart.lms](neochart/neochart.lms)), and runner ([run.sh](neochart/run.sh)). Executed in CI on manual dispatch and weekly schedule.
+```sh
+npm install
+npm run browsers:install
+npm test
+npm run serve
+```
+
+## CLI Usage
+
+The CLI supports quick ad-hoc checks, screenshots, and running Playwright test suites:
+
+```sh
+node src/cli.js test http://127.0.0.1:3000 --title "File Explorer" --selector '#file-table'
+node src/cli.js screenshot http://127.0.0.1:3000 --out screenshots/demo.png
+node src/cli.js run
+node src/cli.js run tests/security.spec.ts
+```
+
+Use `npm link` to register `lmwebtest` locally, then substitute `lmwebtest` for
+`node src/cli.js`. `--help` lists options.
+
+## Test Suites and Examples
+
+- **[examples/moonshot-pricing.lms](examples/moonshot-pricing.lms)**: Worked example acquiring Moonshot client-rendered pricing tables and handing them to `lmhtml` for extraction.
+- **[neochart](neochart/)**: Integration test suite for [neochart.com](https://neochart.com) (legal document library). Includes exploration notes ([EXPLORE.md](neochart/EXPLORE.md)), test script ([neochart.lms](neochart/neochart.lms)), and runner ([run.sh](neochart/run.sh)).
+- **[demo-app](demo-app/)**: Deterministic, fully offline integration test for an interactive mock web app (session-cookie auth, protected routes, stateful buttons) served by `lmmock` and driven through `lmhtml` DOM extraction. Runs in CI on every push and pull request via `./demo-app/run.sh`.
+- **[egtry](egtry/)**: Reusable post-switch book integration test suite for [egtry.com](https://www.egtry.com).
+- **[sites/localweb](sites/localweb/)**: Reference starter scaffold.
 
 ## Continuous Integration
 
-The repository CI workflow ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs two separate jobs on Ubuntu using pinned actions and latest dependencies (latest, by design; breakage is fixed forward):
-1. **`webapp`**: The offline deterministic suite (`./demo-app/run.sh`). Triggered on every `push` to `main` and on `pull_request` to ensure continuous regression protection without network dependencies.
-2. **`neochart`**: The live-site integration suite (`./neochart/run.sh`). Triggered only via manual dispatch (`workflow_dispatch`) and a weekly scheduled cron (`schedule: 0 6 * * 1`) to monitor external site stability without producing flaky CI runs.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs three jobs. `test` runs the Playwright suite. `webapp` runs the offline mock web app suite on every push and pull request. `neochart` runs the live neochart.com suite only on manual dispatch and the weekly schedule. The `webapp` and `neochart` jobs use the latest lmctl, lmmock and lmhtml by design; breakage is fixed forward. `./run.sh` runs both suites locally.
 
 ## Durable Memory
 
@@ -86,9 +128,9 @@ Engineering decisions, workflows, and case studies are recorded under [durable-m
 - [Case study: mock web application integration testing](durable-memory/case-study-mock-webapp.md)
 - [How to add an integration check](durable-memory/how-to-add-a-check.md)
 - [Architectural decisions](durable-memory/decisions.md)
+- [Service ownership model](durable-memory/service-model.md)
+- [Per-site convention](durable-memory/per-site-convention.md)
 
 ## License
 
 MIT licensed; see [LICENSE](LICENSE).
-
-Made by **Lattice Systems LLC**.
