@@ -44,10 +44,9 @@ export LMHTML="$LMHTML_BIN"
 ensure_lmmock "$ROOT" "$HERE"
 export LMMOCK="$LMMOCK_BIN"
 
-# Ensure schema.json is in place
-if [ ! -f "$HERE/schema.json" ]; then
-  "$LMMOCK_BIN" schema > "$HERE/schema.json"
-fi
+# Always export the schema from the lmmock binary actually in use: the schema
+# changes between lmmock releases and the bytecode must match it exactly.
+"$LMMOCK_BIN" schema > "$HERE/schema.json"
 
 # -----------------------------------------------------------------------------
 # 3. Compile mock app bytecode
