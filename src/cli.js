@@ -8,7 +8,9 @@ import { spawn } from 'node:child_process';
 import { chromium, expect } from '@playwright/test';
 import { initSite, batchSites } from './sites.js';
 
-const VERSION = '0.1.0';
+import pkg from '../package.json' with { type: 'json' };
+
+const VERSION = pkg.version;
 
 export function checkBrowserError(error) {
   if (error && typeof error.message === 'string') {
@@ -28,12 +30,17 @@ const help = `Usage:
   lmwebtest --dsl-signatures | --lmcode-signatures
   lmwebtest --dsl-schema [--json] | --lmcode-schema [--json]
   lmwebtest --dsl <bytecode.dslb> | --lmcode <bytecode.dslb>
+  lmwebtest playwright --lmcode-schema [--json] | --lmcode-signatures | --lmcode <bytecode.dslb>
   lmwebtest test <url> [--status 200] [--title "Exact title"] [--selector CSS] [--timeout 10000]
   lmwebtest screenshot <url> --out <file.png> [--no-js] [--timeout 10000]
   lmwebtest init <site-name> [--url <url>]
   lmwebtest batch
   lmwebtest run --all
   lmwebtest run [site-id|file|dir] [Playwright test options]
+
+Playwright lmcode host (cli="lmwebtest playwright"):
+  Exposes the whole Playwright API (launch, pages, locators, file upload, downloads,
+  routing, API requests, assertions, and a reflective call()) to .lms scripts.
 
 LMScript DSL:
   Provides 'context web: Web' and 'context report: Report' for multi-step browser
@@ -53,6 +60,13 @@ async function main() {
   if (command === '--version' || command === '-v') {
     process.stdout.write(`lmwebtest ${VERSION}\n`);
     process.exitCode = 0;
+    return;
+  }
+
+  // lmwebtest playwright --lmcode[-schema|-signatures]: full Playwright API as an lmcode host
+  if (command === 'playwright') {
+    const { main: playwrightHost } = await import('./playwright/host.mjs');
+    process.exitCode = await playwrightHost(args);
     return;
   }
 

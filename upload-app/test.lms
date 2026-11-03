@@ -1,0 +1,118 @@
+# test.lms - Browser file-upload integration test.
+# Run under `lmmock exec` (see run.sh): LMMOCK_URL is the mock site's base URL.
+# Playwright is driven through lmcode by `lmwebtest playwright`.
+
+let base_url = env("LMMOCK_URL", "");
+if (base_url == "") {
+  println("[FAIL] LMMOCK_URL is not set. Run ./upload-app/run.sh or lmmock exec.");
+  exit(1);
+}
+mkdir("work");
+write_file("work/notes.txt", "hello from disk");
+write_file("work/malware.exe", "MZ");
+delete_file("work/downloaded-a.txt");
+
+program = _lmcode_ cli="lmwebtest playwright";
+let base = pw.env("LMMOCK_URL");
+let notes = pw.env("PWD") + "/work/notes.txt";
+let exe = pw.env("PWD") + "/work/malware.exe";
+let b = pw.launch("chromium");
+let p = b.new_page();
+
+# 1. The form renders.
+p.goto(base + "/upload");
+$return.form_title = p.title();
+$return.form_inputs = p.locator("input[type=file][multiple]").count();
+
+# 2. Choose three files (two in memory, one from disk); the page reports what it was given.
+p.set_input_files("#file", "[{\"name\":\"a.txt\",\"mimeType\":\"text/plain\",\"text\":\"alpha\"},{\"name\":\"b.csv\",\"mimeType\":\"text/csv\",\"text\":\"x,y\\n1,2\\n\"}, \"" + notes + "\"]");
+$return.selected = p.text_content("#selected");
+
+# 3. Submit; the server lists every accepted file with its size.
+let ok_resp = p.click_response("#send", "**/upload");
+$return.upload_status = ok_resp.status();
+p.locator("#count").expect("toHaveText", "[\"3 file(s) uploaded\"]");
+$return.result_title = p.title();
+$return.result_files = p.locator("li.file").all_text_contents();
+
+# 4. The server keeps the files; one can be downloaded back.
+p.goto(base + "/uploads");
+$return.stored = p.locator("li.stored").count();
+let dl = p.click_download("a[href='/files/a.txt']");
+$return.download_name = dl.suggested_filename();
+dl.save_as("work/downloaded-a.txt");
+
+# 5. A blocked type is refused with 415 and an error message.
+p.goto(base + "/upload");
+p.set_input_files("#file", "\"" + exe + "\"");
+let bad = p.click_response("#send", "**/upload");
+$return.exe_status = bad.status();
+$return.exe_error = p.text_content("#error");
+
+# 6. Submitting without a file is a 400.
+p.goto(base + "/upload");
+let empty = p.click_response("#send", "**/upload");
+$return.empty_status = empty.status();
+$return.empty_error = p.text_content("#error");
+
+# 7. Clicking the input opens the native chooser; files given to it are selected.
+p.goto(base + "/upload");
+p.click_file_chooser("#file", notes);
+$return.chooser_selected = p.text_content("#selected");
+p.click("#send");
+p.locator("#count").expect("toHaveText", "[\"1 file(s) uploaded\"]");
+p.goto(base + "/uploads");
+$return.stored_after = p.locator("li.stored").count();
+
+# 8. The same flow headless-free of the DOM: raw multipart through the API client.
+let api = pw.request_new();
+let r = api.post(base + "/upload", "{\"multipart\":{\"file\":{\"name\":\"api.json\",\"mimeType\":\"application/json\",\"text\":\"{}\"}}}");
+$return.api_status = r.status();
+$return.api_has_file = str_contains(r.text(), "api.json (2 bytes)");
+api.dispose();
+b.close();
+end _lmcode_
+
+let res = run_lmcode(program, {command: ["lmwebtest", "playwright", "--lmcode", "$DSLFILE"]});
+let stats = {pass: 0, fail: 0};
+
+fn check(condition, name, detail) {
+  if (condition) {
+    stats["pass"] = stats.get("pass", 0) + 1;
+    println(f"[PASS] {name}: {detail}");
+  } else {
+    stats["fail"] = stats.get("fail", 0) + 1;
+    println(f"[FAIL] {name}: {detail}");
+  }
+}
+
+check(res.get("ok", false), "lmcode run", "Playwright program completed");
+if (!res.get("ok", false)) {
+  println(json_stringify(res));
+  exit(1);
+}
+let r = res.get("result", {});
+check(r.get("form_title", "") == "Upload Files", "form page", r.get("form_title", ""));
+check(r.get("form_inputs", 0) == 1, "multiple file input", "present");
+check(r.get("selected", "") == "a.txt (5), b.csv (8), notes.txt (15)", "selected files preview", r.get("selected", ""));
+check(r.get("upload_status", 0) == 200, "upload status", str(r.get("upload_status", 0)));
+check(r.get("result_title", "") == "Upload Complete", "result page", r.get("result_title", ""));
+check(json_stringify(r.get("result_files", "")) == json_stringify("[\"a.txt (5 bytes)\",\"b.csv (8 bytes)\",\"notes.txt (15 bytes)\"]"), "result list", "names and server-side byte sizes");
+check(r.get("stored", 0) == 3, "server state", "3 stored files");
+check(r.get("download_name", "") == "a.txt", "download name", r.get("download_name", ""));
+check(read_file("work/downloaded-a.txt") == "alpha", "downloaded content", "alpha");
+check(r.get("exe_status", 0) == 415, "blocked type status", str(r.get("exe_status", 0)));
+check(contains(r.get("exe_error", ""), "malware.exe"), "blocked type message", r.get("exe_error", ""));
+check(r.get("empty_status", 0) == 400, "empty submit status", str(r.get("empty_status", 0)));
+check(r.get("empty_error", "") == "No file selected", "empty submit message", r.get("empty_error", ""));
+check(r.get("chooser_selected", "") == "notes.txt (15)", "file chooser", r.get("chooser_selected", ""));
+check(r.get("stored_after", 0) == 4, "server state after chooser upload", "4 stored files");
+check(r.get("api_status", 0) == 200, "API multipart upload status", str(r.get("api_status", 0)));
+check(r.get("api_has_file", false), "API multipart upload content", "api.json (2 bytes)");
+
+println("==================================================");
+println(f"Upload integration: {str(stats.get('pass', 0))} passed, {str(stats.get('fail', 0))} failed");
+println("==================================================");
+if (stats.get("fail", 0) > 0) {
+  exit(1);
+}

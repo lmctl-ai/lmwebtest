@@ -5,7 +5,17 @@ import { createHash } from 'node:crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const SCHEMA_PATH = join(__dirname, '../../schema/lmwebtest.dsl.json');
-export const SCHEMA_BYTES = readFileSync(SCHEMA_PATH);
+// In a `bun build --compile` executable the schema is an embedded file (build.sh passes it as an entrypoint).
+async function loadSchemaBytes() {
+  try {
+    return readFileSync(SCHEMA_PATH);
+  } catch (error) {
+    const embedded = typeof Bun !== 'undefined' && Bun.embeddedFiles.find(f => /lmwebtest\.dsl/.test(f.name));
+    if (!embedded) throw error;
+    return Buffer.from(await embedded.arrayBuffer());
+  }
+}
+export const SCHEMA_BYTES = await loadSchemaBytes();
 export const SCHEMA_JSON = JSON.parse(SCHEMA_BYTES.toString('utf8'));
 export const SCHEMA_SHA256 = createHash('sha256').update(SCHEMA_BYTES).digest();
 
