@@ -24,3 +24,4 @@ p1.txt
 .env
 .DS_Store
 demo-app/schema.json
+upload-app/schema.json

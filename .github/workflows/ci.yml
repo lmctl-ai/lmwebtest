@@ -97,6 +97,159 @@ jobs:
       - name: run offline integration test
         run: ./demo-app/run.sh
 
+  upload:
+    name: upload-offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: setup node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - name: setup bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+
+      - name: install lmscript
+        run: npm install -g @lmctl-ai/lmctl@latest
+
+      - name: install dependencies
+        run: npm ci
+
+      - name: install playwright browsers
+        run: npm run browsers:install
+
+      - name: upload test via node (lmmock site, Playwright through lmcode)
+        run: ./upload-app/run.sh
+
+      - name: build single-file executable
+        run: scripts/build-binary.sh "$RUNNER_TEMP/dist" linux-x64
+
+      - name: upload test via the compiled executable
+        run: |
+          mkdir -p "$RUNNER_TEMP/exe"
+          cp "$RUNNER_TEMP/dist/lmwebtest-linux-x64" "$RUNNER_TEMP/exe/lmwebtest"
+          PATH="$RUNNER_TEMP/exe:$PATH" ./upload-app/run.sh
+
+  playwright-host:
+    name: playwright-lmcode-host
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: setup node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - name: install lmscript
+        run: npm install -g @lmctl-ai/lmctl@latest
+
+      - name: install dependencies
+        run: npm ci
+
+      - name: install playwright browsers
+        run: npm run browsers:install
+
+      - name: run host suite
+        run: npm run test:host
+
+  release:
+    name: release
+    needs: [test, webapp, upload, playwright-host]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: setup node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - name: setup bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+
+      - name: next version
+        id: version
+        run: |
+          last="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1 --json tagName --jq '.[0].tagName // empty')"
+          if [ -n "$last" ]; then
+            target="$(gh release view "$last" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq .targetCommitish)"
+            if [ "$target" = "$GITHUB_SHA" ]; then
+              echo "$last already releases $GITHUB_SHA; nothing to do"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          else
+            last="v0.1.0"
+          fi
+          IFS=. read -r major minor patch <<< "${last#v}"
+          next="${major}.${minor}.$((patch + 1))"
+          echo "previous=$last next=v$next"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+
+      - name: install dependencies
+        if: steps.version.outputs.skip != 'true'
+        run: npm ci --omit=dev
+
+      - name: build executables
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
+          scripts/build-binary.sh dist
+
+      - name: smoke test linux-x64 executable
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          [ "$(dist/lmwebtest-linux-x64 --version)" = "lmwebtest ${{ steps.version.outputs.version }}" ]
+          dist/lmwebtest-linux-x64 playwright --lmcode-signatures | grep -q 'method Page.set_input_files(string, string) -> void'
+          dist/lmwebtest-linux-x64 --lmcode-schema --json | cmp - schema/lmwebtest.dsl.json
+
+      - name: publish release
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          gh release create "v${{ steps.version.outputs.version }}" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "v${{ steps.version.outputs.version }}" \
+            --generate-notes \
+            --latest
+
   neochart:
     name: neochart-live
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'

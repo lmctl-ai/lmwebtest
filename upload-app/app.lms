@@ -1,0 +1,131 @@
+# app.lms - Mock file-upload website served by lmmock.
+#   GET  /upload         upload form (multiple files, #file, #send)
+#   POST /upload         multipart handler: lists accepted files, rejects *.exe (415) and empty submits (400)
+#   GET  /uploads        every file accepted so far (state shared across requests)
+#   GET  /files/<name>   download a stored text file back (attachment)
+#   GET  /health
+
+program = _lmcode_ schema="schema.json";
+
+fn page(title: string, inner: string) -> string {
+  return "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>" + title + "</title></head>\n<body>\n" + inner + "</body></html>\n";
+}
+
+fn esc(s: string) -> string {
+  return str_replace(str_replace(str_replace(s, "&", "&amp;"), "<", "&lt;"), ">", "&gt;");
+}
+
+@health
+fn handle_health(x: Exchange) -> void implements Handler {
+  x.status(200);
+  x.set_header("Content-Type", "text/plain; charset=utf-8");
+  x.send("OK");
+}
+
+@form
+fn handle_form(x: Exchange) -> void implements Handler {
+  x.status(200);
+  x.set_header("Content-Type", "text/html; charset=utf-8");
+  x.send(page("Upload Files",
+    "<h1>Upload Files</h1>\n" +
+    "<form id=\"upload-form\" action=\"/upload\" method=\"POST\" enctype=\"multipart/form-data\">\n" +
+    "  <label for=\"file\">Files</label>\n" +
+    "  <input type=\"file\" id=\"file\" name=\"file\" multiple />\n" +
+    "  <button type=\"submit\" id=\"send\">Upload</button>\n" +
+    "</form>\n" +
+    "<p id=\"selected\"></p>\n" +
+    "<p><a id=\"all\" href=\"/uploads\">All uploads</a></p>\n" +
+    "<script>\n" +
+    "document.getElementById('file').addEventListener('change', function (e) {\n" +
+    "  var n = [].map.call(e.target.files, function (f) { return f.name + ' (' + f.size + ')'; });\n" +
+    "  document.getElementById('selected').textContent = n.join(', ');\n" +
+    "});\n" +
+    "</script>\n"));
+}
+
+@upload
+fn handle_upload(x: Exchange) -> void implements Handler {
+  let body = x.body();
+  let parts = str_split(body, "filename=\"");
+  let items = "";
+  let accepted = 0;
+  let rejected = "";
+  for (i in range(1, parts.len())) {
+    let seg = parts.at(i);
+    let name = str_substr(seg, 0, str_find(seg, "\""));
+    if (name != "") {
+      let start = str_find(seg, "\r\n\r\n") + 4;
+      let end = str_find(seg, "\r\n--");
+      let content = str_substr(seg, start, end - start);
+      if (str_ends_with(str_lower(name), ".exe")) {
+        rejected = name;
+      } else {
+        accepted = accepted + 1;
+        x.set("file:" + name, content);
+        x.set("log", x.get("log") + name + "|" + str(str_len(content)) + "\n");
+        items = items + "<li class=\"file\" data-name=\"" + esc(name) + "\">" + esc(name) + " (" + str(str_len(content)) + " bytes)</li>\n";
+      }
+    }
+  }
+  if (rejected != "") {
+    x.status(415);
+    x.set_header("Content-Type", "text/html; charset=utf-8");
+    x.send(page("Upload Rejected", "<h1>Upload Rejected</h1>\n<p id=\"error\">Unsupported file type: " + esc(rejected) + "</p>\n"));
+  } else if (accepted == 0) {
+    x.status(400);
+    x.set_header("Content-Type", "text/html; charset=utf-8");
+    x.send(page("Upload Failed", "<h1>Upload Failed</h1>\n<p id=\"error\">No file selected</p>\n"));
+  } else {
+    x.status(200);
+    x.set_header("Content-Type", "text/html; charset=utf-8");
+    x.send(page("Upload Complete",
+      "<h1>Upload Complete</h1>\n<p id=\"count\">" + str(accepted) + " file(s) uploaded</p>\n<ul id=\"files\">\n" + items + "</ul>\n" +
+      "<p><a id=\"back\" href=\"/upload\">Upload more</a></p>\n"));
+  }
+}
+
+@uploads
+fn handle_uploads(x: Exchange) -> void implements Handler {
+  let lines = str_split(x.get("log"), "\n");
+  let items = "";
+  for (i in range(0, lines.len())) {
+    let line = lines.at(i);
+    if (line != "") {
+      let f = str_split(line, "|");
+      items = items + "<li class=\"stored\"><a href=\"/files/" + url_encode(f.at(0)) + "\">" + esc(f.at(0)) + "</a> " + f.at(1) + "</li>\n";
+    }
+  }
+  x.status(200);
+  x.set_header("Content-Type", "text/html; charset=utf-8");
+  x.send(page("All Uploads", "<h1>All Uploads</h1>\n<ul id=\"stored\">\n" + items + "</ul>\n"));
+}
+
+@download
+fn handle_download(x: Exchange) -> void implements Handler {
+  let name = url_decode(x.param("name"));
+  let content = x.get("file:" + name);
+  if (content == "") {
+    x.status(404);
+    x.send("not found");
+  } else {
+    x.status(200);
+    x.set_header("Content-Type", "application/octet-stream");
+    x.set_header("Content-Disposition", "attachment; filename=\"" + name + "\"");
+    x.send(content);
+  }
+}
+
+route("GET", "/health", "health");
+route("GET", "/upload", "form");
+route("POST", "/upload", "upload");
+route("GET", "/uploads", "uploads");
+route("GET", "/files/{name}", "download");
+
+end _lmcode_
+
+let out_path = "build/app.dslb";
+if (ARGV.len() > 0) {
+  out_path = ARGV.get(0, "build/app.dslb");
+}
+let res = run_lmcode(program, {command: ["sh", "-c", "rm -f \"$2\" && cp \"$1\" \"$2\" && printf \"LMCODE_RETURN_BEGIN\\n{\\\"ok\\\":true,\\\"result\\\":null}\\nLMCODE_RETURN_END\\n\"", "--", "$DSLFILE", out_path]});
+require(res.get("ok", false), "Failed to compile app.dslb");

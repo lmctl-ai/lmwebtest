@@ -9,9 +9,12 @@
   "scripts": {
     "test": "playwright test",
     "serve": "node server.mjs",
-    "check": "node --check src/cli.js && node --check src/sites.js && node --check server.mjs && node --check public/app.js",
+    "check": "node --check src/cli.js && node --check src/sites.js && node --check server.mjs && node --check public/app.js && node --check src/playwright/host.mjs && node --check src/playwright/worker.cjs && node --check src/playwright/methods.cjs",
     "test:list": "playwright test --list",
-    "browsers:install": "playwright install chromium"
+    "browsers:install": "playwright install chromium",
+    "test:host": "LMWEBTEST_HOST_TESTS=1 playwright test tests/playwright-host.spec.ts",
+    "test:upload": "./upload-app/run.sh",
+    "build:binary": "scripts/build-binary.sh"
   },
   "engines": {
     "node": ">=20"
