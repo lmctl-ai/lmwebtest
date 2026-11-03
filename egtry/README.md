@@ -25,6 +25,7 @@ Reusable `lmscript` + `lmhtml` integration test suite for verifying `egtry.com` 
 ./run.sh --book php --host www.egtry.com
 ./run.sh --book ruby --host www.egtry.com
 ./run.sh --book rust --host www.egtry.com
+./run.sh --book scala --host www.egtry.com
 ./run.sh --book swift --host www.egtry.com
 
 # Optional flags
