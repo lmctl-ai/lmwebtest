@@ -14,13 +14,14 @@
     "browsers:install": "playwright install chromium",
     "test:host": "LMWEBTEST_HOST_TESTS=1 playwright test tests/playwright-host.spec.ts",
     "test:upload": "./upload-app/run.sh",
-    "build:binary": "scripts/build-binary.sh"
+    "build:binary": "bun scripts/build-binary.mjs"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
     "@playwright/test": "^1.59.1",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "playwright-core": "^1.59.1"
   }
 }
