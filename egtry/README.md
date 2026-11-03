@@ -50,6 +50,11 @@ Reusable `lmscript` + `lmhtml` integration test suite for verifying `egtry.com` 
 
 ## Homepage R37 QA Suite (`--home` / `home.lms`)
 
+For a local HTTP candidate with unchanged pages on the live site, run
+`./run.sh --home --host http://127.0.0.1:8099 --site-host www.egtry.com --seed 3`.
+This also checks the HTTP-to-HTTPS redirect regression: CSS/JS responses must be
+counted against the final document origin, with the existing HTTP 200 assertions intact.
+
 Pass `--home` to `./run.sh` (or run `lmscript home.lms --host <host> [options]`) to run the repeatable R37 homepage QA suite (`docs/design/simple-viewer/15-homepage.md`) in headless Chrome via Playwright under `flock /tmp/browser-gate.lock`:
 
 1. **Static DOM & Structure (`curl` + `lmhtml` + Chrome)**: Verifies `<header class="home-hero">`, `section#player.home-player[aria-label="Example player"]`, `section#tracks.tracks` (`>= 14` track cards), `<footer>`, absence of `"Featured diagrams"` / `.featured`, and standard player controls (`Run`, `Step`, `⚙` visible; `Edit` hidden; `Next` hidden in `auto` mode).

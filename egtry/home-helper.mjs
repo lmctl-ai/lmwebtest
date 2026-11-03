@@ -975,6 +975,14 @@ async function main() {
     let regSubresources = [];
     let regTargetOrigin = baseOrigin;
 
+    // HTTP candidates can link to a site host that redirects to HTTPS. Track
+    // the committed document origin before its stylesheet/script responses.
+    regPage.on('framenavigated', (frame) => {
+      if (frame === regPage.mainFrame()) {
+        try { regTargetOrigin = new URL(frame.url()).origin; } catch {}
+      }
+    });
+
     regPage.on('console', (msg) => {
       if (msg.type() === 'error') {
         regConsoleErrors.push(msg.text());
