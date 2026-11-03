@@ -100,7 +100,7 @@ call blocks on it. The lmcode runtime is a vendored snapshot of [lmcode-js](http
 
 ## Single-file executables
 
-`scripts/build-binary.sh [OUTDIR] [TARGET...]` compiles `lmwebtest` with [Bun](https://bun.sh) into one executable per platform
+`scripts/build-binary.mjs [OUTDIR] [TARGET...]` compiles `lmwebtest` with [Bun](https://bun.sh) into one executable per platform
 (`linux-x64`, `linux-arm64`, `macos-x64`, `macos-arm64`, `windows-x64`), with the runtime, Playwright, the lmcode VM and the
 schema embedded. Node is not needed to run them; the browser still is: `npx playwright install chromium`. In the executable,
 `lmwebtest run` / `batch` (which launch the Playwright test runner against a checkout's `sites/`) are unavailable; everything
@@ -158,7 +158,7 @@ Use `npm link` to register `lmwebtest` locally, then substitute `lmwebtest` for
 
 ### Automatic releases
 
-On every push to `main`, once `test`, `webapp`, `upload` and `playwright-host` all pass, the `release` job picks the next patch version after the latest GitHub release, builds the five executables with `scripts/build-binary.sh`, smoke-tests the Linux one, and publishes `vX.Y.Z` with `lmwebtest-<os>-<arch>[.exe]`, `SHA256SUMS` and generated notes (asset names are what `lmscript install` downloads). A failing job blocks the release; a re-run of the same commit does not publish twice. For a minor or major bump, publish that release by hand once; the next automatic one continues from it.
+On every push to `main`, once `test`, `webapp`, `upload` and `playwright-host` all pass, the `release` job picks the next patch version after the latest GitHub release, builds the five executables with `scripts/build-binary.mjs`, smoke-tests the Linux one, and publishes `vX.Y.Z` with `lmwebtest-<os>-<arch>[.exe]`, `SHA256SUMS` and generated notes (asset names are what `lmscript install` downloads). A failing job blocks the release; a re-run of the same commit does not publish twice. For a minor or major bump, publish that release by hand once; the next automatic one continues from it.
 
 ## Durable Memory
 

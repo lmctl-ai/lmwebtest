@@ -140,12 +140,13 @@ jobs:
         run: ./upload-app/run.sh
 
       - name: build single-file executable
-        run: scripts/build-binary.sh "$RUNNER_TEMP/dist" linux-x64
+        run: bun scripts/build-binary.mjs "$RUNNER_TEMP/dist" linux-x64
 
-      - name: upload test via the compiled executable
+      - name: upload test via the compiled executable (no node_modules, no checkout paths)
         run: |
           mkdir -p "$RUNNER_TEMP/exe"
           cp "$RUNNER_TEMP/dist/lmwebtest-linux-x64" "$RUNNER_TEMP/exe/lmwebtest"
+          rm -rf node_modules
           PATH="$RUNNER_TEMP/exe:$PATH" ./upload-app/run.sh
 
   playwright-host:
@@ -238,11 +239,12 @@ jobs:
         if: steps.version.outputs.skip != 'true'
         run: |
           npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
-          scripts/build-binary.sh dist
+          bun scripts/build-binary.mjs dist
 
-      - name: smoke test linux-x64 executable
+      - name: smoke test linux-x64 executable (without node_modules)
         if: steps.version.outputs.skip != 'true'
         run: |
+          rm -rf node_modules
           [ "$(dist/lmwebtest-linux-x64 --version)" = "lmwebtest ${{ steps.version.outputs.version }}" ]
           dist/lmwebtest-linux-x64 playwright --lmcode-signatures | grep -q 'method Page.set_input_files(string, string) -> void'
           dist/lmwebtest-linux-x64 --lmcode-schema --json | cmp - schema/lmwebtest.dsl.json
