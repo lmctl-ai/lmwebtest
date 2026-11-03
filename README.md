@@ -154,7 +154,7 @@ Use `npm link` to register `lmwebtest` locally, then substitute `lmwebtest` for
 
 ## Continuous Integration
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs: `test` (Playwright suite), `webapp` (offline mock web app), `upload` (offline file-upload site, once with Node and once with the compiled Linux executable), `playwright-host` (the `lmwebtest playwright` suite) and, only on manual dispatch and the weekly schedule, `neochart` (live site). The offline jobs use the latest lmctl, lmmock and lmhtml by design; breakage is fixed forward. `./run.sh` runs the suites locally.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs: `test` (Playwright suite; plus the live moonshot worked example on dispatch/schedule), `webapp` (offline mock web app), `upload` (offline file-upload site, once with Node and once with the compiled Linux executable), `playwright-host` (the `lmwebtest playwright` suite) and, only on manual dispatch and the weekly schedule, `neochart` (live site). The offline jobs use the latest lmctl, lmmock and lmhtml by design; breakage is fixed forward. `./run.sh` runs the suites locally.
 
 ### Automatic releases
 

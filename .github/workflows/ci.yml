@@ -53,7 +53,14 @@ jobs:
       - name: run test suite
         run: npm test
 
-      - name: run worked example
+      # The worked example fetches a live third-party page and needs the current lmhtml protocol,
+      # which the lmscript pinned above predates, so it runs with the live suites only.
+      - name: install current lmscript for the worked example
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+        run: npm install -g @lmctl-ai/lmctl@latest
+
+      - name: run worked example (live)
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
         run: lmscript examples/moonshot-pricing.lms
 
   webapp:
