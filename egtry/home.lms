@@ -1,0 +1,652 @@
+# home.lms - Repeatable Homepage (R37) QA suite for egtry.com
+#
+# Usage:
+#   ./run.sh --home --host www.egtry.com
+#   ./run.sh --home --host https://v2.egtry.com
+#   lmscript home.lms --host <host> [--seed 3] [--autoplay-count 4] [--sample-count 40]
+#                     [--min-fit-pct 95] [--forbid-hero-words "books,tex,katex"]
+#                     [--require-hero-words ""] [--allow-legacy-hero] [--max-pre-player-kb 120]
+#
+# Verifies the R37 homepage (spec docs/design/simple-viewer/15-homepage.md):
+#   1. Static HTML fetch (curl) & DOM extraction via lmhtml (_lmcode_):
+#      hero, player section (aria-label="Example player"), tracks, footer, no "Featured diagrams".
+#   2. Hero copy wording check (configurable via --forbid-hero-words / --require-hero-words;
+#      defaults to forbidding visible 'books', 'TeX', 'KaTeX' in .home-hero).
+#   3. Page weight before the player loads (HTML + CSS + static JS modules <= max-pre-player-kb).
+#   4. Responsive layout at 1280x900 and 600x900 (no horizontal overflow, standard Run/Step/⚙ buttons,
+#      Edit hidden, Next hidden in autoplay).
+#   5. Player autoplays >= 4 examples in a row with ~3 s pauses across different books,
+#      run-state label (.sv-rs) cycling to "■ Ended", and clean value comments (.sv-note).
+#   6. "Open page ->" link of each autoplayed example returns HTTP 200 and contains the same example.
+#   7. Clicking Step stops autoplay permanently, sets data-mode="manual", and shows Next.
+#   8. No way back to autoplay without refresh (completing a run in manual mode stays on that example).
+#   9. Clicking Next loads another example in data-state="ready" ("○ Not started") without auto-starting.
+#  10. Refreshing the page restores autoplay (data-mode="auto", Next hidden, playback starts).
+#  11. prefers-reduced-motion: reduce => no autoplay (starts in manual mode with Next visible and state="ready").
+#  12. Blocked example fetch (HTTP 500) is skipped cleanly and another example plays with .sv-error hidden.
+#  13. Player window shows >= 95% of a sample of 40 examples without internal scrolling (at 1280px and 600px).
+#  14. Site-wide non-regression URL list (/, /index.html, /books/, 5 tracks, 3 non-programming book pages,
+#      /python/, /go/, /tracks/programming-languages/) return HTTP 200 with all CSS/JS HTTP 200.
+#  15. Zero console errors or uncaught page errors across all runs.
+
+# -----------------------------------------------------------------------------
+# 0. Parse CLI Arguments & Helpers
+# -----------------------------------------------------------------------------
+fn normalize_host(raw) {
+  let h = trim(raw);
+  if (starts_with(h, "https://")) {
+    h = substring(h, 8);
+  } else if (starts_with(h, "http://")) {
+    h = substring(h, 7);
+  }
+  let slash_idx = index_of(h, "/");
+  if (slash_idx >= 0) {
+    h = substring(h, 0, slash_idx);
+  }
+  return h;
+}
+
+fn to_lower_ascii(s) {
+  let upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  let lower = "abcdefghijklmnopqrstuvwxyz";
+  let out = "";
+  for (i in range(0, s.len())) {
+    let ch = substring(s, i, i + 1);
+    let idx = index_of(upper, ch);
+    if (idx >= 0) {
+      out = out + substring(lower, idx, idx + 1);
+    } else {
+      out = out + ch;
+    }
+  }
+  return out;
+}
+
+fn parse_positive_int(raw, fallback) {
+  let s = trim(raw);
+  if (s == "") {
+    return fallback;
+  }
+  let digits = "0123456789";
+  let val = 0;
+  for (ci in range(0, s.len())) {
+    let ch = substring(s, ci, ci + 1);
+    let d = index_of(digits, ch);
+    if (d < 0) {
+      return fallback;
+    }
+    val = val * 10 + d;
+  }
+  if (val <= 0) {
+    return fallback;
+  }
+  return val;
+}
+
+fn parse_csv_words(raw) {
+  let parts = split(raw, ",");
+  let res = [];
+  for (i in range(0, parts.len())) {
+    let w = trim(parts.get(i, ""));
+    if (w != "") {
+      push(res, w);
+    }
+  }
+  return res;
+}
+
+let host_raw = env("EGTRY_HOST", "www.egtry.com");
+let site_host_raw = env("EGTRY_SITE_HOST", "");
+let seed_str = env("EGTRY_SEED", "3");
+let autoplay_str = env("EGTRY_AUTOPLAY_COUNT", "4");
+let sample_str = env("EGTRY_SAMPLE_COUNT", "40");
+let min_fit_str = env("EGTRY_MIN_FIT_PCT", "95");
+let forbid_hero_str = env("EGTRY_FORBID_HERO_WORDS", "books,tex,katex");
+let require_hero_str = env("EGTRY_REQUIRE_HERO_WORDS", "");
+let max_pre_kb_str = env("EGTRY_MAX_PRE_PLAYER_KB", "120");
+let allow_legacy_hero = false;
+
+for (ai in range(0, args.len())) {
+  let arg = args.get(ai, "");
+  if (arg == "--host" && ai + 1 < args.len()) {
+    host_raw = args.get(ai + 1, host_raw);
+  }
+  if (arg == "--site-host" && ai + 1 < args.len()) {
+    site_host_raw = args.get(ai + 1, site_host_raw);
+  }
+  if (arg == "--seed" && ai + 1 < args.len()) {
+    seed_str = args.get(ai + 1, seed_str);
+  }
+  if (arg == "--autoplay-count" && ai + 1 < args.len()) {
+    autoplay_str = args.get(ai + 1, autoplay_str);
+  }
+  if (arg == "--sample-count" && ai + 1 < args.len()) {
+    sample_str = args.get(ai + 1, sample_str);
+  }
+  if (arg == "--min-fit-pct" && ai + 1 < args.len()) {
+    min_fit_str = args.get(ai + 1, min_fit_str);
+  }
+  if ((arg == "--forbid-hero-words" || arg == "--hero-forbid") && ai + 1 < args.len()) {
+    forbid_hero_str = args.get(ai + 1, "");
+  }
+  if ((arg == "--require-hero-words" || arg == "--hero-require") && ai + 1 < args.len()) {
+    require_hero_str = args.get(ai + 1, "");
+  }
+  if (arg == "--allow-legacy-hero") {
+    allow_legacy_hero = true;
+  }
+  if (arg == "--max-pre-player-kb" && ai + 1 < args.len()) {
+    max_pre_kb_str = args.get(ai + 1, max_pre_kb_str);
+  }
+}
+
+if (allow_legacy_hero) {
+  forbid_hero_str = "";
+}
+
+let host = normalize_host(host_raw);
+let site_host = site_host_raw != "" ? normalize_host(site_host_raw) : (host == "v2.egtry.com" ? "www.egtry.com" : host);
+let seed = parse_positive_int(seed_str, 3);
+let autoplay_count = parse_positive_int(autoplay_str, 4);
+let sample_count = parse_positive_int(sample_str, 40);
+let min_fit_pct = parse_positive_int(min_fit_str, 95);
+let max_pre_player_kb = parse_positive_int(max_pre_kb_str, 120);
+let forbid_hero_words = parse_csv_words(forbid_hero_str);
+let require_hero_words = parse_csv_words(require_hero_str);
+
+mkdir("work", true);
+
+let stats = {pass: 0, fail: 0};
+let checks_list = [];
+let report_lines = [];
+
+fn log_line(line) {
+  println(line);
+  push(report_lines, line);
+}
+
+fn check(condition, name, detail) {
+  if (condition) {
+    stats["pass"] = stats.get("pass", 0) + 1;
+    let line = f"[PASS] {name}: {detail}";
+    log_line(line);
+    push(checks_list, {name: name, status: "PASS", detail: detail});
+  } else {
+    stats["fail"] = stats.get("fail", 0) + 1;
+    let line = f"[FAIL] {name}: {detail}";
+    log_line(line);
+    push(checks_list, {name: name, status: "FAIL", detail: detail});
+  }
+}
+
+log_line(f"=== Homepage R37 QA Suite: host='{host}' seed={str(seed)} autoplay={str(autoplay_count)} sample={str(sample_count)} minFit={str(min_fit_pct)}% forbidHero=[{join(forbid_hero_words, ',')}] ===");
+
+# -----------------------------------------------------------------------------
+# 1. Static HTML Fetch (curl) & DOM Extraction via lmhtml (_lmcode_)
+# -----------------------------------------------------------------------------
+let home_html_path = "work/home_index.html";
+let home_url = f"https://{host}/";
+
+let curl_res = system([
+  "curl", "-sS", "-L", "--max-time", "20", "--retry", "2",
+  "-o", home_html_path,
+  "-w", "%{http_code}",
+  home_url
+]);
+let home_http = trim(curl_res.get("stdout", ""));
+let home_fetch_ok = curl_res.get("code", 1) == 0 && home_http == "200" && file_exists(home_html_path);
+
+check(home_fetch_ok,
+  f"Homepage Static HTML Fetch ({home_url})",
+  home_fetch_ok ? f"HTTP {home_http}" : f"failed with HTTP '{home_http}'");
+
+if (!home_fetch_ok) {
+  exit(1);
+}
+
+p = _lmcode_ cli="lmhtml" install="github:lmctl-ai/lmhtml@latest";
+let doc = html.load("work/home_index.html");
+report.add("title", "work/home_index.html", 0, doc.title());
+
+let heroes = doc.select("header.home-hero");
+if (heroes.len() > 0) {
+  report.add("hero_text", "work/home_index.html", 0, heroes.at(0).text());
+}
+let h1s = doc.select("header.home-hero h1");
+if (h1s.len() > 0) {
+  report.add("hero_h1", "work/home_index.html", 0, h1s.at(0).text());
+}
+let ledes = doc.select("header.home-hero .home-hero__lede");
+if (ledes.len() > 0) {
+  report.add("hero_lede", "work/home_index.html", 0, ledes.at(0).text());
+}
+let players = doc.select("section#player.home-player");
+if (players.len() > 0) {
+  report.add("player_aria", "work/home_index.html", 0, players.at(0).attr("aria-label"));
+}
+let stages = doc.select("section#player.home-player [data-home-stage]");
+report.add("stage_count", "work/home_index.html", stages.len(), "stages");
+
+let tracks = doc.select("section#tracks.tracks .track-card");
+report.add("track_card_count", "work/home_index.html", tracks.len(), "tracks");
+
+let featured = doc.select(".featured");
+report.add("featured_count", "work/home_index.html", featured.len(), "featured");
+
+report.write_json("work/home_static_extracted.json");
+end _lmcode_
+
+let lmhtml_bin = env("LMHTML", "");
+if (lmhtml_bin == "" || !file_exists(lmhtml_bin)) {
+  let found = which("lmhtml");
+  if (found != null) {
+    lmhtml_bin = found;
+  }
+}
+
+let lmcode_res = run_lmcode(p, {
+  "command": [
+    "sh",
+    "-c",
+    lmhtml_bin + " --lmcode \"$1\" >/dev/null && printf 'LMCODE_RETURN_BEGIN\\n{\"ok\":true,\"result\":null}\\nLMCODE_RETURN_END\\n'",
+    "sh",
+    "$DSLFILE"
+  ]
+});
+
+let static_title = "";
+let static_hero_h1 = "";
+let static_player_aria = "";
+let static_stage_count = 0;
+let static_track_cards = 0;
+let static_featured_count = 0;
+
+if (lmcode_res.get("ok", false) && file_exists("work/home_static_extracted.json")) {
+  let sdata = json_parse(read_file("work/home_static_extracted.json"));
+  let sfindings = sdata.get("findings", []);
+  for (si in range(0, sfindings.len())) {
+    let fitem = sfindings.get(si, {});
+    let rrule = fitem.get("kind", "");
+    let rmsg = trim(fitem.get("message", ""));
+    if (rrule == "title") {
+      static_title = rmsg;
+    } else if (rrule == "hero_h1") {
+      static_hero_h1 = rmsg;
+    } else if (rrule == "player_aria") {
+      static_player_aria = rmsg;
+    } else if (rrule == "stage_count") {
+      static_stage_count = fitem.get("line", 0);
+    } else if (rrule == "track_card_count") {
+      static_track_cards = fitem.get("line", 0);
+    } else if (rrule == "featured_count") {
+      static_featured_count = fitem.get("line", 0);
+    }
+  }
+}
+
+let raw_home_html = read_file(home_html_path);
+let raw_has_featured_diagrams = index_of(to_lower_ascii(raw_home_html), "featured diagrams") >= 0;
+let static_dom_ok = static_title != "" && static_hero_h1 != "" && static_player_aria == "Example player" && static_stage_count == 1 && static_track_cards >= 3 && static_featured_count == 0 && !raw_has_featured_diagrams;
+
+check(static_dom_ok,
+  "Static DOM Extraction via lmhtml (Hero, Player Region, Tracks, No 'Featured diagrams')",
+  static_dom_ok ? f"title='{static_title}', h1='{static_hero_h1}', player[aria-label='{static_player_aria}'], trackCards={str(static_track_cards)}, featured=0"
+                : f"title='{static_title}', h1='{static_hero_h1}', playerAria='{static_player_aria}', stages={str(static_stage_count)}, tracks={str(static_track_cards)}, featured={str(static_featured_count)}, hasFeaturedText={str(raw_has_featured_diagrams)}");
+
+# -----------------------------------------------------------------------------
+# 2. Build Non-Regression URL Plan & Run Playwright Helper under flock
+# -----------------------------------------------------------------------------
+let non_regression_urls = [
+  {label: "Homepage /", path: "/", useSiteHost: false},
+  {label: "Homepage /index.html", path: "/index.html", useSiteHost: false},
+  {label: "Books Catalog /books/", path: "/books/", useSiteHost: true},
+  {label: "Track 1: /tracks/programming-languages/", path: "/tracks/programming-languages/", useSiteHost: false},
+  {label: "Track 2: /tracks/data-structures-algorithms/", path: "/tracks/data-structures-algorithms/", useSiteHost: false},
+  {label: "Track 3: /tracks/web/", path: "/tracks/web/", useSiteHost: false},
+  {label: "Track 4: /tracks/math/", path: "/tracks/math/", useSiteHost: true},
+  {label: "Track 5: /tracks/ml/", path: "/tracks/ml/", useSiteHost: true},
+  {label: "Non-Programming Book 1: /backpropagation-exactly/the-gradient-question/", path: "/backpropagation-exactly/the-gradient-question/", useSiteHost: true},
+  {label: "Non-Programming Book 2: /linear-algebra/vector-add/", path: "/linear-algebra/vector-add/", useSiteHost: true},
+  {label: "Non-Programming Book 3: /rsa-with-keys-you-can-check/two-primes-make-a-modulus/", path: "/rsa-with-keys-you-can-check/two-primes-make-a-modulus/", useSiteHost: true},
+  {label: "Switched Book: /python/", path: "/python/", useSiteHost: false},
+  {label: "Switched Book: /go/", path: "/go/", useSiteHost: false}
+];
+
+if (host == "v2.egtry.com") {
+  push(non_regression_urls, {label: "v2 Non-Programming Book: /html/code_kbd_inline/", path: "/html/code_kbd_inline/", useSiteHost: false});
+  push(non_regression_urls, {label: "v2 Non-Programming Book: /css/border_radius_pill/", path: "/css/border_radius_pill/", useSiteHost: false});
+  push(non_regression_urls, {label: "v2 Non-Programming Book: /python-dsa/array-sum/", path: "/python-dsa/array-sum/", useSiteHost: false});
+}
+
+let safe_host_tag = join(split(host, "."), "_");
+let plan_path = f"work/home_plan_{safe_host_tag}.json";
+let raw_out_path = f"work/home_raw_{safe_host_tag}.json";
+
+write_file(plan_path, json_stringify({
+  host: host,
+  siteHost: site_host,
+  seed: seed,
+  autoplayCount: autoplay_count,
+  sampleCount: sample_count,
+  minFitPct: min_fit_pct,
+  forbidHeroWords: forbid_hero_words,
+  requireHeroWords: require_hero_words,
+  maxPrePlayerKb: max_pre_player_kb,
+  nonRegressionUrls: non_regression_urls
+}));
+
+let helper_res = system([
+  "flock", "/tmp/browser-gate.lock",
+  "node", "home-helper.mjs",
+  plan_path,
+  raw_out_path
+]);
+
+let helper_ok = helper_res.get("code", 1) == 0 && file_exists(raw_out_path);
+check(helper_ok,
+  "Playwright Chrome Helper Execution (flock /tmp/browser-gate.lock)",
+  helper_ok ? f"completed cleanly and wrote {raw_out_path}"
+            : f"exit={str(helper_res.get('code', 1))} stderr={trim(helper_res.get('stderr', ''))}");
+
+if (!helper_ok) {
+  exit(1);
+}
+
+let raw = json_parse(read_file(raw_out_path));
+
+# -----------------------------------------------------------------------------
+# 3. Assert Structure, Hero Copy Wording, Page Weight & 1280/600 Layout
+# -----------------------------------------------------------------------------
+let st = raw.get("structure", {});
+let ctrls = st.get("controls", {});
+let structure_ok = st.get("status", 0) == 200 &&
+                   st.get("hasHero", false) &&
+                   st.get("hasPlayerSection", false) &&
+                   st.get("playerAriaLabel", "") == "Example player" &&
+                   st.get("hasTracksSection", false) &&
+                   st.get("trackCardCount", 0) >= 3 &&
+                   st.get("hasFooter", false) &&
+                   !st.get("hasFeaturedElement", true) &&
+                   !st.get("hasFeaturedDiagramsText", true) &&
+                   ctrls.get("runVisible", false) &&
+                   ctrls.get("stepVisible", false) &&
+                   ctrls.get("gearVisible", false) &&
+                   ctrls.get("editHidden", false) &&
+                   ctrls.get("nextHiddenInAuto", false);
+
+check(structure_ok,
+  "Homepage Structure & Player Controls in Chrome",
+  structure_ok ? f"hero=true, player[aria-label='Example player']=true, tracks={str(st.get('trackCardCount', 0))}, no 'Featured diagrams', Run/Step/⚙ visible, Edit/Next hidden in auto"
+               : f"status={str(st.get('status', 0))}, hero={str(st.get('hasHero', false))}, player={str(st.get('hasPlayerSection', false))}, tracks={str(st.get('trackCardCount', 0))}, featured={str(st.get('hasFeaturedDiagramsText', false))}, ctrls={json_stringify(ctrls)}");
+
+# 3b. Hero Copy Wording Check (configurable via --forbid-hero-words and --require-hero-words)
+let hero_vis = st.get("heroVisibleText", "");
+let hero_vis_lower = to_lower_ascii(hero_vis);
+let found_forbidden = [];
+for (fwi in range(0, forbid_hero_words.len())) {
+  let fw = forbid_hero_words.get(fwi, "");
+  if (fw != "" && index_of(hero_vis_lower, to_lower_ascii(fw)) >= 0) {
+    push(found_forbidden, fw);
+  }
+}
+let missing_required = [];
+for (rwi in range(0, require_hero_words.len())) {
+  let rw = require_hero_words.get(rwi, "");
+  if (rw != "" && index_of(hero_vis_lower, to_lower_ascii(rw)) < 0) {
+    push(missing_required, rw);
+  }
+}
+let hero_wording_ok = hero_vis != "" && found_forbidden.len() == 0 && missing_required.len() == 0;
+check(hero_wording_ok,
+  f"Hero Copy Wording (forbid=[{join(forbid_hero_words, ', ')}], require=[{join(require_hero_words, ', ')}])",
+  hero_wording_ok ? f"visible hero copy passed wording checks: '{hero_vis}'"
+                  : f"foundForbidden=[{join(found_forbidden, ', ')}], missingRequired=[{join(missing_required, ', ')}] in visible hero copy: '{hero_vis}'");
+
+# 3c. Page Weight Before Player Loads
+let pw_info = raw.get("pageWeight", {});
+let pre_kb = pw_info.get("prePlayerKb", 9999);
+let pre_bytes = pw_info.get("prePlayerBytes", 0);
+let pre_res = pw_info.get("prePlayerResources", []);
+let pre_all_200 = pw_info.get("allPrePlayer200", false);
+let first_ex_kb = pw_info.get("firstExampleTotalKb", 0);
+let weight_ok = pre_all_200 && pre_bytes > 0 && pre_kb <= max_pre_player_kb;
+
+check(weight_ok,
+  f"Page Weight Before Player Loads (<= {str(max_pre_player_kb)} KB)",
+  weight_ok ? f"{str(pre_kb)} KB ({str(pre_bytes)} B across {str(pre_res.len())} static resources, all HTTP 200; {str(first_ex_kb)} KB after first example)"
+            : f"prePlayerKb={str(pre_kb)} KB (limit {str(max_pre_player_kb)} KB), all200={str(pre_all_200)}, count={str(pre_res.len())}");
+
+# 3d. Responsive Layout at 1280px and 600px
+let l1280 = raw.get("layout1280", {});
+let l600 = raw.get("layout600", {});
+let l1280_ok = !l1280.get("overflowX", true) && l1280.get("playerFitsViewport", false) && l1280.get("playerWidth", 0) > 400;
+let l600_ok = !l600.get("overflowX", true) && l600.get("playerFitsViewport", false) && l600.get("playerWidth", 0) > 300;
+let layout_ok = l1280_ok && l600_ok;
+
+check(layout_ok,
+  "Responsive Layout at 1280x900 and 600x900 (No Horizontal Overflow)",
+  layout_ok ? f"1280px: scrollWidth={str(l1280.get('scrollWidth', 0))} (player={str(l1280.get('playerWidth', 0))}px); 600px: scrollWidth={str(l600.get('scrollWidth', 0))} (player={str(l600.get('playerWidth', 0))}px)"
+            : f"1280px={json_stringify(l1280)}, 600px={json_stringify(l600)}");
+
+# -----------------------------------------------------------------------------
+# 4. Assert Autoplay (>= 4 Examples in a Row with ~3 s Pauses Across Books)
+# -----------------------------------------------------------------------------
+let ap = raw.get("autoplay", {});
+let ap_examples = ap.get("examples", []);
+let ap_completed = ap.get("completedCount", 0);
+let ap_distinct_ex = ap.get("distinctExampleCount", 0);
+let ap_distinct_books = ap.get("distinctBookCount", 0);
+let ap_books_list = ap.get("distinctBooks", []);
+let ap_pauses = ap.get("pausesMs", []);
+let ap_pauses_ok = ap.get("allPausesAround3s", false);
+
+let ap_all_notes_ok = true;
+let ap_all_rs_ok = true;
+let ap_summary_items = [];
+for (aei in range(0, ap_examples.len())) {
+  let aex = ap_examples.get(aei, {});
+  let ex_id = aex.get("exampleId", "");
+  let ex_book = aex.get("book", "");
+  let ex_pause = aex.get("pauseAfterMs", 0);
+  let ex_notes = aex.get("seenNotes", []);
+  let ex_leaks = aex.get("leakedNotes", []);
+  let ex_rs = aex.get("rsTransitions", []);
+  if (ex_notes.len() == 0 || ex_leaks.len() > 0) {
+    ap_all_notes_ok = false;
+  }
+  if (!contains(ex_rs, "▶ Running") || !contains(ex_rs, "■ Ended")) {
+    ap_all_rs_ok = false;
+  }
+  push(ap_summary_items, f"{ex_book}/{ex_id} (pause={str(ex_pause)}ms)");
+}
+
+let autoplay_ok = ap_completed >= autoplay_count &&
+                  ap_distinct_ex >= autoplay_count &&
+                  ap_distinct_books >= 2 &&
+                  ap_pauses_ok &&
+                  ap_all_notes_ok &&
+                  ap_all_rs_ok;
+
+check(autoplay_ok,
+  f"Autoplay >= {str(autoplay_count)} Examples in a Row (~3 s pauses across different books)",
+  autoplay_ok ? f"{str(ap_completed)} distinct examples across {str(ap_distinct_books)} books [{join(ap_books_list, ', ')}]: {join(ap_summary_items, ' -> ')}"
+              : f"completed={str(ap_completed)}, distinctEx={str(ap_distinct_ex)}, books={str(ap_distinct_books)}, pausesOk={str(ap_pauses_ok)} ([{join(ap_summary_items, ', ')}]), notesOk={str(ap_all_notes_ok)}, rsOk={str(ap_all_rs_ok)}");
+
+# -----------------------------------------------------------------------------
+# 5. Assert Open Page Links for Each Autoplayed Example
+# -----------------------------------------------------------------------------
+let open_checks = raw.get("openPageChecks", []);
+let open_all_ok = open_checks.len() >= autoplay_count;
+let open_details = [];
+for (oci in range(0, open_checks.len())) {
+  let oc = open_checks.get(oci, {});
+  let oc_href = oc.get("openHref", "");
+  let oc_ex = oc.get("exampleId", "");
+  let oc_pst = oc.get("pageStatus", 0);
+  let oc_dst = oc.get("dataStatus", 0);
+  let oc_match = oc.get("hasMatchingExample", false);
+  let oc_h1 = oc.get("pageH1", "");
+  if (oc_pst != 200 || oc_dst != 200 || !oc_match || oc_h1 == "") {
+    open_all_ok = false;
+  }
+  push(open_details, f"{oc_href} (HTTP {str(oc_pst)}, has {oc_ex}={str(oc_match)})");
+}
+
+check(open_all_ok,
+  f"Open Page Links Return HTTP 200 & Contain Matching Example ({str(open_checks.len())} verified)",
+  open_all_ok ? join(open_details, "; ")
+              : f"failed open-page checks: {join(open_details, '; ')}");
+
+# -----------------------------------------------------------------------------
+# 6. Assert Step Stops Autoplay & Shows Next, No Way Back, Next Works, Refresh Restores
+# -----------------------------------------------------------------------------
+let sm = raw.get("stepManual", {});
+let sm_imm = sm.get("immediate", {});
+let step_manual_ok = sm_imm.get("mode", "") == "manual" &&
+                     sm_imm.get("nextVisible", false) &&
+                     sm_imm.get("state", "") == "stepping" &&
+                     sm_imm.get("rsText", "") == "▶ Running" &&
+                     sm.get("stayedOnSameExample", false);
+
+check(step_manual_ok,
+  "Step Stops Autoplay Permanently & Shows Next",
+  step_manual_ok ? f"mode='{sm_imm.get('mode', '')}', state='{sm_imm.get('state', '')}', rs='{sm_imm.get('rsText', '')}', nextVisible=true, stayed on '{sm_imm.get('exampleId', '')}' after 3.4s"
+                 : json_stringify(sm));
+
+let nwb = raw.get("noWayBack", {});
+let no_way_back_ok = nwb.get("stayedEndedInManual", false);
+check(no_way_back_ok,
+  "No Way Back to Autoplay Without Refresh (Manual Run to Ended Stays Put)",
+  no_way_back_ok ? f"after reaching '■ Ended' and waiting 3.6s in manual mode, stayed on '{nwb.get('exampleId', '')}' (mode='manual', state='ended')"
+                 : json_stringify(nwb));
+
+let nm = raw.get("nextManual", {});
+let nm_imm = nm.get("immediate", {});
+let next_manual_ok = nm.get("loadedDifferentExample", false) && nm.get("stayedReadyWithoutAutoplay", false);
+check(next_manual_ok,
+  "Next Button Loads Another Example in Ready State Without Autoplay",
+  next_manual_ok ? f"'{nm.get('previousExampleId', '')}' -> '{nm_imm.get('exampleId', '')}' ('{nm_imm.get('title', '')}'), state='ready' ('○ Not started') immediately and after 3.4s"
+                 : json_stringify(nm));
+
+let ra = raw.get("refreshAuto", {});
+let refresh_ok = ra.get("restoredAutoplay", false);
+check(refresh_ok,
+  "Page Refresh Restores Autoplay",
+  refresh_ok ? f"after reload: mode='{ra.get('mode', '')}', nextHidden={str(ra.get('nextHidden', false))}, state='{ra.get('state', '')}' ('{ra.get('rsText', '')}') on '{ra.get('exampleId', '')}'"
+             : json_stringify(ra));
+
+# -----------------------------------------------------------------------------
+# 7. Assert prefers-reduced-motion: reduce => No Autoplay
+# -----------------------------------------------------------------------------
+let rm = raw.get("reducedMotion", {});
+let rm_init = rm.get("initial", {});
+let rm_ok = rm.get("noAutoplay", false);
+check(rm_ok,
+  "prefers-reduced-motion: reduce Disables Autoplay",
+  rm_ok ? f"started in mode='{rm_init.get('mode', '')}', nextVisible=true, state='{rm_init.get('state', '')}' ('{rm_init.get('rsText', '')}') on '{rm_init.get('exampleId', '')}', unchanged after 3.4s"
+        : json_stringify(rm));
+
+# -----------------------------------------------------------------------------
+# 8. Assert Blocked Example Fetch Is Skipped Cleanly
+# -----------------------------------------------------------------------------
+let bfr = raw.get("blockedFetchRecovery", {});
+let bfr_ok = bfr.get("recoveredCleanly", false);
+check(bfr_ok,
+  "Blocked Example Fetch Is Skipped Cleanly",
+  bfr_ok ? f"blocked 1st recording ({bfr.get('blockedDataUrl', '')}) -> skipped and loaded '{bfr.get('exampleId', '')}' ('{bfr.get('title', '')}'), errorHidden=true"
+         : json_stringify(bfr));
+
+# -----------------------------------------------------------------------------
+# 9. Assert Player Window Shows >= min_fit_pct% of 40 Sampled Examples Without Scrolling
+# -----------------------------------------------------------------------------
+let wf = raw.get("windowFitSample", {});
+let wf_total = wf.get("sampleCount", 0);
+let wf_fits_1280 = wf.get("fits1280Count", 0);
+let wf_pct_1280 = wf.get("fitPct1280", 0);
+let wf_noscroll_1280 = wf.get("noScrollPlan1280Count", 0);
+let wf_noscroll_pct_1280 = wf.get("noScrollPlanPct1280", 0);
+let wf_fits_600 = wf.get("fits600Count", 0);
+let wf_pct_600 = wf.get("fitPct600", 0);
+let wf_noscroll_600 = wf.get("noScrollPlan600Count", 0);
+let wf_noscroll_pct_600 = wf.get("noScrollPlanPct600", 0);
+
+let wf_ok = wf_total >= sample_count && wf_pct_1280 >= min_fit_pct && wf_pct_600 >= min_fit_pct;
+check(wf_ok,
+  f"Player Window Fits >= {str(min_fit_pct)}% of {str(sample_count)} Sampled Examples Without Internal Scrolling",
+  wf_ok ? f"1280px: {str(wf_fits_1280)}/{str(wf_total)} ({str(wf_pct_1280)}%) fit without scrolling; 600px: {str(wf_fits_600)}/{str(wf_total)} ({str(wf_pct_600)}%) fit without scrolling"
+        : f"1280px: fit={str(wf_fits_1280)}/{str(wf_total)} ({str(wf_pct_1280)}%); 600px: fit={str(wf_fits_600)}/{str(wf_total)} ({str(wf_pct_600)}%)");
+
+# -----------------------------------------------------------------------------
+# 10. Assert Non-Regression URL List (Document + CSS/JS HTTP 200)
+# -----------------------------------------------------------------------------
+let non_reg = raw.get("nonRegression", []);
+for (nri in range(0, non_reg.len())) {
+  let nr = non_reg.get(nri, {});
+  let nr_label = nr.get("label", "");
+  let nr_url = nr.get("url", "");
+  let nr_status = nr.get("status", 0);
+  let nr_title = nr.get("title", "");
+  let nr_h1 = nr.get("h1", "");
+  let nr_assets = nr.get("cssJsCount", 0);
+  let nr_bad_assets = nr.get("non200Assets", []);
+  let nr_cerrs = nr.get("consoleErrors", []);
+  let nr_perrs = nr.get("pageErrors", []);
+
+  let nr_ok = nr_status == 200 && nr_title != "" && nr_h1 != "" && nr_assets > 0 && nr_bad_assets.len() == 0 && nr_cerrs.len() == 0 && nr_perrs.len() == 0;
+  check(nr_ok,
+    f"Non-Regression: {nr_label} ({nr_url})",
+    nr_ok ? f"HTTP 200, h1='{nr_h1}', {str(nr_assets)} CSS/JS subresources HTTP 200, 0 console errors"
+          : f"status={str(nr_status)}, h1='{nr_h1}', cssJs={str(nr_assets)}, badAssets={json_stringify(nr_bad_assets)}, consoleErrors={json_stringify(nr_cerrs)}, pageErrors={json_stringify(nr_perrs)}");
+}
+
+# -----------------------------------------------------------------------------
+# 11. Assert Zero Console Errors or Page Errors Across All Homepage Scenarios
+# -----------------------------------------------------------------------------
+let c_errs = raw.get("consoleErrors", []);
+let p_errs = raw.get("pageErrors", []);
+let f_reqs = raw.get("failedRequests", []);
+let zero_errs_ok = c_errs.len() == 0 && p_errs.len() == 0 && f_reqs.len() == 0;
+
+check(zero_errs_ok,
+  "Zero Console Errors, Page Errors, or Failed Requests Across Homepage Scenarios",
+  zero_errs_ok ? "0 console.error, 0 pageerror, 0 failed same-origin requests"
+               : f"consoleErrors={json_stringify(c_errs)}, pageErrors={json_stringify(p_errs)}, failedRequests={json_stringify(f_reqs)}");
+
+# -----------------------------------------------------------------------------
+# 12. Write JSON & Text Reports and Exit
+# -----------------------------------------------------------------------------
+let total_passed = stats.get("pass", 0);
+let total_failed = stats.get("fail", 0);
+log_line("==================================================");
+log_line(f"Homepage R37 QA Summary ({host}): {str(total_passed)} passed, {str(total_failed)} failed");
+log_line("==================================================");
+
+let report_obj = {
+  suite: "egtry-home",
+  host: host,
+  siteHost: site_host,
+  seed: seed,
+  autoplayCount: autoplay_count,
+  sampleCount: sample_count,
+  minFitPct: min_fit_pct,
+  forbidHeroWords: forbid_hero_words,
+  requireHeroWords: require_hero_words,
+  passed: total_passed,
+  failed: total_failed,
+  status: total_failed == 0 ? "PASS" : "FAIL",
+  checks: checks_list
+};
+
+let report_json_str = json_stringify(report_obj) + "\n";
+let report_txt_str = join(report_lines, "\n") + "\n";
+
+write_file(f"work/home_report_{safe_host_tag}.json", report_json_str);
+write_file("work/home_report.json", report_json_str);
+write_file(f"work/home_report_{safe_host_tag}.txt", report_txt_str);
+write_file("work/home_report.txt", report_txt_str);
+
+if (total_failed > 0) {
+  exit(1);
+} else {
+  exit(0);
+}

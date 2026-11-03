@@ -10,23 +10,31 @@ ROOT="$(cd "$HERE/.." && pwd)"
 # 0. Handle help / usage & mode flags
 # -----------------------------------------------------------------------------
 CHROME_MODE=0
+HOME_MODE=0
 PASS_ARGS=()
 for arg in "$@"; do
   if [ "$arg" = "--help" ] || [ "$arg" = "-h" ]; then
-    echo "Usage: ./run.sh [--chrome] [--book <name>] [--host <host>] [--pages <N>] [--seed <S>] [--v1-host <host>] [--url-map <path>]"
+    echo "Usage: ./run.sh [--home | --chrome] [--book <name>] [--host <host>] [--pages <N>] [--seed <S>] [--v1-host <host>] [--url-map <path>]"
     echo ""
     echo "Options:"
-    echo "  --chrome           Run headless Chrome (Playwright) QA suite (chrome.lms) under flock /tmp/browser-gate.lock"
-    echo "  --book <name>      Book slug to test (default: python, e.g. bash, c, cpp, csharp, dart, go, java, javascript, kotlin, lua, perl, php, ruby, scala, sql, swift, typescript, rust, python)"
-    echo "  --host <host>      Production host (default: www.egtry.com)"
-    echo "  --pages <N>        Number of lesson pages to sample in --chrome mode (default: 10: first, last, N-2 seeded random)"
-    echo "  --seed <S>         Deterministic PRNG seed for page sampling in --chrome mode"
-    echo "  --v1-host <host>   Legacy host for tracks comparison in default curl+lmhtml mode (default: v1.egtry.com)"
-    echo "  --url-map <path>   Path to url-map.json in default curl+lmhtml mode"
-    echo "  --help, -h         Show this help message and exit"
+    echo "  --home                     Run headless Chrome (Playwright) R37 homepage QA suite (home.lms) under flock /tmp/browser-gate.lock"
+    echo "  --chrome                   Run headless Chrome (Playwright) book QA suite (chrome.lms) under flock /tmp/browser-gate.lock"
+    echo "  --book <name>              Book slug to test (default: python, e.g. bash, c, cpp, csharp, dart, go, java, javascript, kotlin, lua, perl, php, ruby, scala, sql, swift, typescript, rust, python)"
+    echo "  --host <host>              Production or candidate host (default: www.egtry.com, or v2.egtry.com)"
+    echo "  --pages <N>                Number of lesson pages to sample in --chrome mode (default: 10: first, last, N-2 seeded random)"
+    echo "  --seed <S>                 Deterministic PRNG seed for sampling (--chrome or --home mode)"
+    echo "  --forbid-hero-words <csv>  Comma-separated words forbidden in .home-hero in --home mode (default: books,tex,katex)"
+    echo "  --require-hero-words <csv> Comma-separated words required in .home-hero in --home mode"
+    echo "  --allow-legacy-hero        Allow legacy pre-polish hero wording in --home mode"
+    echo "  --min-fit-pct <P>          Minimum % of 40-example sample fitting without scroll in --home mode (default: 95)"
+    echo "  --v1-host <host>           Legacy host for tracks comparison in default curl+lmhtml mode (default: v1.egtry.com)"
+    echo "  --url-map <path>           Path to url-map.json in default curl+lmhtml mode"
+    echo "  --help, -h                 Show this help message and exit"
     exit 0
   elif [ "$arg" = "--chrome" ]; then
     CHROME_MODE=1
+  elif [ "$arg" = "--home" ]; then
+    HOME_MODE=1
   else
     PASS_ARGS+=("$arg")
   fi
@@ -155,7 +163,10 @@ export PATH="$(dirname "$LMHTML_BIN"):$PATH"
 echo "=== Prerequisites ready (LMHTML=$LMHTML) ==="
 
 cd "$HERE"
-if [ "$CHROME_MODE" -eq 1 ]; then
+if [ "$HOME_MODE" -eq 1 ]; then
+  echo "=== Running egtry Homepage R37 QA suite (${PASS_ARGS[*]:-}) ==="
+  exec lmscript home.lms "${PASS_ARGS[@]}"
+elif [ "$CHROME_MODE" -eq 1 ]; then
   echo "=== Running egtry Chrome QA suite (${PASS_ARGS[*]:-}) ==="
   exec lmscript chrome.lms "${PASS_ARGS[@]}"
 else
