@@ -14,7 +14,7 @@ for arg in "$@"; do
     echo "Usage: ./run.sh [--book <name>] [--host <host>] [--v1-host <host>] [--url-map <path>]"
     echo ""
     echo "Options:"
-    echo "  --book <name>      Book slug to test (default: python, e.g. c, go, java, javascript, rust, python)"
+    echo "  --book <name>      Book slug to test (default: python, e.g. c, go, java, javascript, typescript, rust, python)"
     echo "  --host <host>      Production host (default: www.egtry.com)"
     echo "  --v1-host <host>   Legacy host for tracks comparison (default: v1.egtry.com)"
     echo "  --url-map <path>   Path to url-map.json"
