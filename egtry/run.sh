@@ -7,19 +7,28 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 
 # -----------------------------------------------------------------------------
-# 0. Handle help / usage
+# 0. Handle help / usage & mode flags
 # -----------------------------------------------------------------------------
+CHROME_MODE=0
+PASS_ARGS=()
 for arg in "$@"; do
   if [ "$arg" = "--help" ] || [ "$arg" = "-h" ]; then
-    echo "Usage: ./run.sh [--book <name>] [--host <host>] [--v1-host <host>] [--url-map <path>]"
+    echo "Usage: ./run.sh [--chrome] [--book <name>] [--host <host>] [--pages <N>] [--seed <S>] [--v1-host <host>] [--url-map <path>]"
     echo ""
     echo "Options:"
+    echo "  --chrome           Run headless Chrome (Playwright) QA suite (chrome.lms) under flock /tmp/browser-gate.lock"
     echo "  --book <name>      Book slug to test (default: python, e.g. bash, c, cpp, csharp, dart, go, java, javascript, kotlin, lua, perl, php, ruby, scala, sql, swift, typescript, rust, python)"
     echo "  --host <host>      Production host (default: www.egtry.com)"
-    echo "  --v1-host <host>   Legacy host for tracks comparison (default: v1.egtry.com)"
-    echo "  --url-map <path>   Path to url-map.json"
+    echo "  --pages <N>        Number of lesson pages to sample in --chrome mode (default: 10: first, last, N-2 seeded random)"
+    echo "  --seed <S>         Deterministic PRNG seed for page sampling in --chrome mode"
+    echo "  --v1-host <host>   Legacy host for tracks comparison in default curl+lmhtml mode (default: v1.egtry.com)"
+    echo "  --url-map <path>   Path to url-map.json in default curl+lmhtml mode"
     echo "  --help, -h         Show this help message and exit"
     exit 0
+  elif [ "$arg" = "--chrome" ]; then
+    CHROME_MODE=1
+  else
+    PASS_ARGS+=("$arg")
   fi
 done
 
@@ -144,7 +153,12 @@ export LMHTML="$LMHTML_BIN"
 export PATH="$(dirname "$LMHTML_BIN"):$PATH"
 
 echo "=== Prerequisites ready (LMHTML=$LMHTML) ==="
-echo "=== Running egtry integration test ($*) ==="
 
 cd "$HERE"
-exec flock /tmp/egtry-suite.lock lmscript egtry.lms "$@"
+if [ "$CHROME_MODE" -eq 1 ]; then
+  echo "=== Running egtry Chrome QA suite (${PASS_ARGS[*]:-}) ==="
+  exec lmscript chrome.lms "${PASS_ARGS[@]}"
+else
+  echo "=== Running egtry integration test ($*) ==="
+  exec flock /tmp/egtry-suite.lock lmscript egtry.lms "$@"
+fi

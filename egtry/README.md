@@ -33,9 +33,28 @@ Reusable `lmscript` + `lmhtml` integration test suite for verifying `egtry.com` 
 ./run.sh --book c --host www.egtry.com \
   --v1-host v1.egtry.com \
   --url-map /home/ubuntu/repos/lmctlhq/interp-docs/docs/design/simple-viewer/poc/v7/url-map.json
+
+# Headless Chrome (Playwright) QA suite (under flock /tmp/browser-gate.lock)
+./run.sh --chrome --book python --host www.egtry.com
+./run.sh --chrome --book c --host www.egtry.com
+./run.sh --chrome --book go --host www.egtry.com
+./run.sh --chrome --book python --host www.egtry.com --pages 10 --seed 42
 ```
 
-## What It Checks
+## Headless Chrome QA Suite (`--chrome` / `chrome.lms`)
+
+Pass `--chrome` to `./run.sh` (or run `lmscript chrome.lms --book <id> --host <host> [--pages N] [--seed S]`) to run the repeatable browser QA suite in headless Chrome via Playwright under `flock /tmp/browser-gate.lock`:
+
+1. **Tracks Link Navigation**: Opens `https://<host>/tracks/programming-languages/` in Chrome, verifies the `/<book>/` link is present, and clicks it to navigate to `https://<host>/<book>/` (`HTTP 200`).
+2. **Book Index & Deterministic Page Sampling**: Discovers all lesson links on `/<book>/` in reading order via `lmhtml` (`_lmcode_`), verifies `/<book>/` in Chrome, and samples `N` lesson pages (default `10`: the first lesson, the last lesson, and `N - 2` deterministic seeded random interior lessons).
+3. **Run State & Value Comments**: On each sampled page, clicks `Run` (`.sv-run`) and verifies the run-state label (`.sv-rs`) transitions `○ Not started` -> `▶ Running` -> `■ Ended`, value comments (`.sv-note`) appear (`//...`), and no leaked internals (`[object Object]`, `__lm`, `<object`, `Traceback`) appear.
+4. **Recorded Output Matching**: Fetches `data/<example>.json` for each sampled page and verifies the viewer's rendered `out:` notes/titles match the recorded `output` events in the trace.
+5. **Step & Edit Controls**: Verifies clicking `Step` (`.sv-step`) enters `data-state="stepping"` at `step=1` (`▶ Running`) with the current line highlighted, and clicking `Edit` (`.sv-edit-btn`) enters `data-state="edit"` (`○ Not started`, `aria-pressed="true"`) with the editable `.sv-edit` textarea populated with the recorded source.
+6. **Pager & Breadcrumbs Navigation**: Verifies `nav.sv-crumbs` and `nav.sv-pager` (`rel="prev"`, `rel="next"`, and `All pages`) on every sampled page, including live browser click navigation on `next` from the first page and `prev` from the last page.
+7. **Zero Console or Network Errors**: Verifies zero `console.error`, zero `pageerror`, and zero failed HTTP requests (`status >= 400`) on every visited page.
+8. **Reports**: Outputs `[PASS]` / `[FAIL]` per check, writes JSON and text reports to `work/chrome_report_<book>.json` (`.txt`) and `work/chrome_report.json` (`.txt`), and exits non-zero on any failure.
+
+## Default HTTP + DOM Suite (`egtry.lms`) — What It Checks
 
 For every kept URL of `/<book>/` in `url-map.json` (plus the book index `/<book>/`):
 

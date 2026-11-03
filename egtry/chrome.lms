@@ -1,0 +1,611 @@
+# chrome.lms - Repeatable Chrome (Playwright) QA suite for egtry.com books
+#
+# Usage:
+#   ./run.sh --chrome --book python --host www.egtry.com [--pages 10] [--seed 42]
+#   lmscript chrome.lms --book <id> --host <host> [--pages <N>] [--seed <S>]
+#
+# Orchestrates headless Chrome QA under `flock /tmp/browser-gate.lock`:
+#   1. Fetches https://<host>/<book>/ with curl and extracts all lesson links in
+#      book order via `_lmcode_ cli="lmhtml"`.
+#   2. Samples N lesson pages: first page, last page, and N-2 deterministic
+#      seeded random interior pages (sorted in book order).
+#   3. Invokes `chrome-helper.mjs` under `flock /tmp/browser-gate.lock` to drive
+#      Chrome across /tracks/programming-languages/, /<book>/, and the N sampled pages.
+#   4. Asserts PASS/FAIL per check:
+#      - /tracks/programming-languages/ -> /<book>/ link works in Chrome
+#      - Book index /<book>/ loads with title, h1, lesson links, zero errors
+#      - On each of the N sampled pages:
+#        * Initial state: data-state="ready", .sv-rs "○ Not started"
+#        * Click Run: .sv-rs transitions "○ Not started" -> "▶ Running" -> "■ Ended"
+#        * Value comments (.sv-note) appear with no leaked internals
+#        * Example output matches the recorded output in data/<example>.json
+#        * Step button transitions to data-state="stepping", step 1, "▶ Running", active line
+#        * Edit button transitions to data-state="edit", textarea visible with source, "○ Not started"
+#        * Pager prev/next/All-pages links work (including live click navigation on first/last page)
+#        * Zero console.error, pageerror, and failed HTTP requests
+#   5. Writes JSON and text reports to work/chrome_report_<book>.json (.txt) and
+#      work/chrome_report.json (.txt), and exits non-zero on any failure.
+
+# -----------------------------------------------------------------------------
+# 0. Parse CLI Arguments & Initialize Workspace
+# -----------------------------------------------------------------------------
+let book = env("EGTRY_BOOK", "python");
+let host = env("EGTRY_HOST", "www.egtry.com");
+let pages_str = env("EGTRY_PAGES", "10");
+let seed_str = env("EGTRY_SEED", "");
+
+for (ai in range(0, args.len())) {
+  let arg = args.get(ai, "");
+  if (arg == "--book" && ai + 1 < args.len()) {
+    book = args.get(ai + 1, book);
+  }
+  if (arg == "--host" && ai + 1 < args.len()) {
+    host = args.get(ai + 1, host);
+  }
+  if (arg == "--pages" && ai + 1 < args.len()) {
+    pages_str = args.get(ai + 1, pages_str);
+  }
+  if (arg == "--seed" && ai + 1 < args.len()) {
+    seed_str = args.get(ai + 1, seed_str);
+  }
+}
+
+fn parse_positive_int(raw, fallback) {
+  let s = trim(raw);
+  if (s == "") {
+    return fallback;
+  }
+  let digits = "0123456789";
+  let val = 0;
+  for (ci in range(0, s.len())) {
+    let ch = substring(s, ci, ci + 1);
+    let d = index_of(digits, ch);
+    if (d < 0) {
+      return fallback;
+    }
+    val = val * 10 + d;
+  }
+  if (val <= 0) {
+    return fallback;
+  }
+  return val;
+}
+
+# Deterministic seed from book name when --seed is not explicitly passed
+fn compute_book_seed(name) {
+  let alpha = "abcdefghijklmnopqrstuvwxyz0123456789_-";
+  let acc = 1337;
+  for (bi in range(0, name.len())) {
+    let ch = substring(name, bi, bi + 1);
+    let idx = index_of(alpha, ch);
+    if (idx < 0) {
+      idx = bi + 17;
+    }
+    acc = (acc * 131 + idx + 1) % 2147483647;
+  }
+  if (acc <= 0) {
+    acc = 42;
+  }
+  return acc;
+}
+
+let sample_count = parse_positive_int(pages_str, 10);
+if (sample_count < 2) {
+  sample_count = 2;
+}
+let seed = seed_str != "" ? parse_positive_int(seed_str, compute_book_seed(book)) : compute_book_seed(book);
+
+mkdir("work", true);
+
+let stats = {pass: 0, fail: 0};
+let checks_list = [];
+let report_lines = [];
+
+fn log_line(line) {
+  println(line);
+  push(report_lines, line);
+}
+
+fn check(condition, name, detail) {
+  if (condition) {
+    stats["pass"] = stats.get("pass", 0) + 1;
+    let line = f"[PASS] {name}: {detail}";
+    log_line(line);
+    push(checks_list, {name: name, status: "PASS", detail: detail});
+  } else {
+    stats["fail"] = stats.get("fail", 0) + 1;
+    let line = f"[FAIL] {name}: {detail}";
+    log_line(line);
+    push(checks_list, {name: name, status: "FAIL", detail: detail});
+  }
+}
+
+# Resolve relative or root-relative href against base_path (e.g. "/python/")
+fn resolve_href(base_path, raw_href) {
+  let href = trim(raw_href);
+  let hash_idx = index_of(href, "#");
+  if (hash_idx >= 0) {
+    href = substring(href, 0, hash_idx);
+  }
+  let q_idx = index_of(href, "?");
+  if (q_idx >= 0) {
+    href = substring(href, 0, q_idx);
+  }
+  if (href == "") {
+    return base_path;
+  }
+  if (starts_with(href, "http://") || starts_with(href, "https://") ||
+      starts_with(href, "mailto:") || starts_with(href, "javascript:") ||
+      starts_with(href, "data:") || starts_with(href, "//")) {
+    return "";
+  }
+  if (starts_with(href, "/")) {
+    return href;
+  }
+
+  let dir_path = base_path;
+  if (!ends_with(dir_path, "/")) {
+    let last_slash = last_index_of(dir_path, "/");
+    if (last_slash >= 0) {
+      dir_path = substring(dir_path, 0, last_slash + 1);
+    } else {
+      dir_path = "/";
+    }
+  }
+
+  let base_parts = split(dir_path, "/");
+  let stack = [];
+  for (bi in range(0, base_parts.len())) {
+    let bp = base_parts.get(bi, "");
+    if (bp != "" && bp != ".") {
+      push(stack, bp);
+    }
+  }
+
+  let trailing_slash = ends_with(href, "/");
+  let rel_parts = split(href, "/");
+  for (ri in range(0, rel_parts.len())) {
+    let rp = rel_parts.get(ri, "");
+    if (rp == "" || rp == ".") {
+      if (ri == rel_parts.len() - 1 && rp == ".") {
+        trailing_slash = true;
+      }
+    } else if (rp == "..") {
+      if (stack.len() > 0) {
+        pop(stack);
+      }
+      if (ri == rel_parts.len() - 1) {
+        trailing_slash = true;
+      }
+    } else {
+      push(stack, rp);
+    }
+  }
+
+  if (stack.len() == 0) {
+    return "/";
+  }
+  let joined = "/" + join(stack, "/");
+  if (trailing_slash && !ends_with(joined, "/")) {
+    joined = joined + "/";
+  }
+  return joined;
+}
+
+log_line(f"=== Chrome QA Suite: book='{book}' host='{host}' pages={str(sample_count)} seed={str(seed)} ===");
+
+# -----------------------------------------------------------------------------
+# 1. Fetch Book Index & Discover Ordered Lesson Pages via lmhtml (_lmcode_)
+# -----------------------------------------------------------------------------
+let book_prefix = "/" + book + "/";
+let index_html_path = "work/chrome_index.html";
+let index_url = f"https://{host}{book_prefix}";
+
+let curl_res = system([
+  "curl", "-sS", "-L", "--max-time", "20", "--retry", "2",
+  "-o", index_html_path,
+  "-w", "%{http_code}",
+  index_url
+]);
+let index_http = trim(curl_res.get("stdout", ""));
+let index_fetch_ok = curl_res.get("code", 1) == 0 && index_http == "200" && file_exists(index_html_path);
+
+check(index_fetch_ok,
+  f"Book Index Fetch ({index_url})",
+  index_fetch_ok ? f"HTTP {index_http}" : f"failed with HTTP '{index_http}'");
+
+if (!index_fetch_ok) {
+  exit(1);
+}
+
+p = _lmcode_ cli="lmhtml" install="github:lmctl-ai/lmhtml@latest";
+let doc = html.load("work/chrome_index.html");
+let links = doc.links();
+for (j in range(0, links.len())) {
+  report.add("link", "work/chrome_index.html", j, links.at(j));
+}
+report.write_json("work/chrome_index_links.json");
+end _lmcode_
+
+let lmhtml_bin = env("LMHTML", "");
+if (lmhtml_bin == "" || !file_exists(lmhtml_bin)) {
+  let found = which("lmhtml");
+  if (found != null) {
+    lmhtml_bin = found;
+  }
+}
+
+let lmcode_res = run_lmcode(p, {
+  "command": [
+    "sh",
+    "-c",
+    lmhtml_bin + " --lmcode \"$1\" >/dev/null && printf 'LMCODE_RETURN_BEGIN\\n{\"ok\":true,\"result\":null}\\nLMCODE_RETURN_END\\n'",
+    "sh",
+    "$DSLFILE"
+  ]
+});
+
+let findings = [];
+if (lmcode_res.get("ok", false) && file_exists("work/chrome_index_links.json")) {
+  let report_data = json_parse(read_file("work/chrome_index_links.json"));
+  findings = report_data.get("findings", []);
+}
+
+let all_lessons = [];
+let seen_lesson_map = {};
+
+for (li in range(0, findings.len())) {
+  let item = findings.get(li, {});
+  let href = item.get("message", "");
+  let resolved = resolve_href(book_prefix, href);
+  if (starts_with(resolved, book_prefix) && resolved != book_prefix && ends_with(resolved, "/")) {
+    let segs = split(resolved, "/");
+    # "/<book>/<slug>/" splits into ["", book, slug, ""] (length 4)
+    if (segs.len() == 4) {
+      let slug = segs.get(2, "");
+      if (slug != "" && seen_lesson_map.get(resolved, "") == "") {
+        seen_lesson_map[resolved] = "1";
+        push(all_lessons, {
+          slug: slug,
+          urlPath: resolved,
+          index: all_lessons.len()
+        });
+      }
+    }
+  }
+}
+
+let total_lessons = all_lessons.len();
+check(total_lessons >= 2,
+  f"Book Index Lesson Discovery ({book_prefix})",
+  f"discovered {str(total_lessons)} ordered lesson pages (first='{total_lessons > 0 ? all_lessons.get(0, {}).get('slug', '') : ''}', last='{total_lessons > 0 ? all_lessons.get(total_lessons - 1, {}).get('slug', '') : ''}')");
+
+if (total_lessons < 2) {
+  exit(1);
+}
+
+# -----------------------------------------------------------------------------
+# 2. Sample N Lesson Pages (first, last, and N-2 seeded random interior pages)
+# -----------------------------------------------------------------------------
+let target_n = sample_count;
+if (target_n > total_lessons) {
+  target_n = total_lessons;
+}
+
+let selected_flag = {};
+selected_flag["0"] = true;
+selected_flag[str(total_lessons - 1)] = true;
+let picked_count = 2;
+let rng_state = seed % 2147483647;
+if (rng_state <= 0) {
+  rng_state = 42;
+}
+
+let interior_count = total_lessons - 2;
+let attempts = 0;
+while (picked_count < target_n && attempts < 5000 && interior_count > 0) {
+  attempts = attempts + 1;
+  rng_state = (rng_state * 48271) % 2147483647;
+  let candidate = 1 + (rng_state % interior_count);
+  let key = str(candidate);
+  if (!selected_flag.get(key, false)) {
+    selected_flag[key] = true;
+    picked_count = picked_count + 1;
+  }
+}
+
+# Fallback linear fill if PRNG didn't hit enough unique indices
+if (picked_count < target_n) {
+  for (fi in range(1, total_lessons - 1)) {
+    if (picked_count < target_n) {
+      let fkey = str(fi);
+      if (!selected_flag.get(fkey, false)) {
+        selected_flag[fkey] = true;
+        picked_count = picked_count + 1;
+      }
+    }
+  }
+}
+
+let sampled_pages = [];
+let sampled_slugs = [];
+for (pi in range(0, total_lessons)) {
+  if (selected_flag.get(str(pi), false)) {
+    let item = all_lessons.get(pi, {});
+    let slug = item.get("slug", "");
+    let url_path = item.get("urlPath", "");
+    push(sampled_pages, {
+      slug: slug,
+      urlPath: url_path,
+      index: pi,
+      isFirst: pi == 0,
+      isLast: pi == total_lessons - 1
+    });
+    push(sampled_slugs, slug);
+  }
+}
+
+log_line(f"Sampled {str(sampled_pages.len())} pages (seed={str(seed)}): {join(sampled_slugs, ', ')}");
+
+let plan_path = f"work/chrome_plan_{book}.json";
+let raw_out_path = f"work/chrome_raw_{book}.json";
+write_file(plan_path, json_stringify({
+  book: book,
+  host: host,
+  seed: seed,
+  totalLessons: total_lessons,
+  pages: sampled_pages
+}));
+
+# -----------------------------------------------------------------------------
+# 3. Run Headless Chrome via Playwright Helper under flock /tmp/browser-gate.lock
+# -----------------------------------------------------------------------------
+let helper_res = system([
+  "flock", "/tmp/browser-gate.lock",
+  "node", "chrome-helper.mjs",
+  plan_path,
+  raw_out_path
+]);
+
+let helper_ok = helper_res.get("code", 1) == 0 && file_exists(raw_out_path);
+check(helper_ok,
+  "Playwright Chrome Helper Execution (flock /tmp/browser-gate.lock)",
+  helper_ok ? f"completed cleanly and wrote {raw_out_path}"
+            : f"exit={str(helper_res.get('code', 1))} stderr={trim(helper_res.get('stderr', ''))}");
+
+if (!helper_ok) {
+  exit(1);
+}
+
+let raw = json_parse(read_file(raw_out_path));
+
+# -----------------------------------------------------------------------------
+# 4. Assert Tracks Page & Book Index Checks
+# -----------------------------------------------------------------------------
+let tracks = raw.get("tracks", {});
+let tracks_status = tracks.get("status", 0);
+let tracks_has_link = tracks.get("hasBookLink", false);
+let tracks_clicked_path = tracks.get("clickedPath", "");
+let tracks_clicked_status = tracks.get("clickedStatus", 0);
+let tracks_errs = tracks.get("consoleErrors", []).len() + tracks.get("pageErrors", []).len() + tracks.get("failedRequests", []).len();
+
+let tracks_ok = tracks_status == 200 && tracks_has_link && tracks_clicked_path == book_prefix && tracks_clicked_status == 200 && tracks_errs == 0;
+check(tracks_ok,
+  f"Tracks Page (/tracks/programming-languages/) -> {book_prefix} Link",
+  tracks_ok ? f"HTTP 200, link '{tracks.get('bookLinkHref', '')}' clicked -> '{tracks_clicked_path}' (HTTP {str(tracks_clicked_status)}), 0 console/network errors"
+            : f"status={str(tracks_status)}, hasLink={str(tracks_has_link)}, clickedPath='{tracks_clicked_path}' ({str(tracks_clicked_status)}), errors={str(tracks_errs)}");
+
+let bidx = raw.get("bookIndex", {});
+let bidx_status = bidx.get("status", 0);
+let bidx_title = bidx.get("title", "");
+let bidx_h1 = bidx.get("h1", "");
+let bidx_lessons = bidx.get("lessonLinkCount", 0);
+let bidx_errs = bidx.get("consoleErrors", []).len() + bidx.get("pageErrors", []).len() + bidx.get("failedRequests", []).len();
+
+let bidx_ok = bidx_status == 200 && bidx_title != "" && bidx_h1 != "" && bidx_lessons == total_lessons && bidx_errs == 0;
+check(bidx_ok,
+  f"Book Index ({book_prefix}) in Chrome",
+  bidx_ok ? f"HTTP 200, h1='{bidx_h1}', {str(bidx_lessons)} lesson links, 0 console/network errors"
+          : f"status={str(bidx_status)}, h1='{bidx_h1}', lessons={str(bidx_lessons)}/{str(total_lessons)}, errors={str(bidx_errs)}");
+
+# -----------------------------------------------------------------------------
+# 5. Assert Per-Page Checks Across All N Sampled Pages
+# -----------------------------------------------------------------------------
+let page_results = raw.get("pages", []);
+check(page_results.len() == sampled_pages.len(),
+  f"Sampled Pages Visited Count ({str(sampled_pages.len())} pages)",
+  f"visited {str(page_results.len())} of {str(sampled_pages.len())} sampled pages");
+
+for (pi in range(0, page_results.len())) {
+  let pr = page_results.get(pi, {});
+  let p_url = pr.get("urlPath", "");
+  let p_slug = pr.get("slug", "");
+  let is_first = pr.get("isFirst", false);
+  let is_last = pr.get("isLast", false);
+  let role_tag = is_first ? "first" : (is_last ? "last" : "sampled");
+  let label_prefix = f"[{str(pi + 1)}/{str(page_results.len())} {role_tag}] {p_url}";
+
+  # 5a. Page Load, Title/H1 & Initial Viewer State
+  let p_status = pr.get("status", 0);
+  let p_title = pr.get("title", "");
+  let p_h1 = pr.get("h1", "");
+  let p_vcount = pr.get("viewerCount", 0);
+  let p_ex = pr.get("exampleId", "");
+  let init_info = pr.get("initial", {});
+  let init_state = init_info.get("state", "");
+  let init_rs = init_info.get("rsText", "");
+
+  let load_ok = p_status == 200 && p_title != "" && p_h1 != "" && p_vcount > 0 && init_state == "ready" && init_rs == "○ Not started";
+  check(load_ok,
+    f"{label_prefix} Initial State",
+    load_ok ? f"HTTP 200, h1='{p_h1}', example='{p_ex}', state='{init_state}', rs='{init_rs}'"
+            : f"status={str(p_status)}, h1='{p_h1}', viewers={str(p_vcount)}, state='{init_state}', rs='{init_rs}'");
+
+  # 5b. Run State Label Transition: Not started -> Running -> Ended
+  let run_info = pr.get("run", {});
+  let transitions = run_info.get("rsTransitions", []);
+  let final_state = run_info.get("finalState", "");
+  let final_rs = run_info.get("finalRsText", "");
+  let run_err = run_info.get("errorText", "");
+
+  let saw_not_started = contains(transitions, "○ Not started");
+  let saw_running = contains(transitions, "▶ Running");
+  let saw_ended = contains(transitions, "■ Ended") && final_rs == "■ Ended" && final_state == "ended";
+  let run_cycle_ok = saw_not_started && saw_running && saw_ended && run_err == "";
+
+  check(run_cycle_ok,
+    f"{label_prefix} Run State Cycle (Not started -> Running -> Ended)",
+    run_cycle_ok ? f"transitions=[{join(transitions, ' -> ')}], finalState='{final_state}'"
+                 : f"transitions=[{join(transitions, ' -> ')}], finalState='{final_state}', finalRs='{final_rs}', error='{run_err}'");
+
+  # 5c. Value Comments (.sv-note) Appear & Have No Leaked Internals
+  let seen_notes = run_info.get("seenNotes", []);
+  let final_notes = run_info.get("finalNotes", []);
+  let leaked_notes = pr.get("leakedNotes", []);
+  let all_notes_prefixed = true;
+  for (ni in range(0, seen_notes.len())) {
+    let ntxt = seen_notes.get(ni, "");
+    if (!starts_with(ntxt, "//")) {
+      all_notes_prefixed = false;
+    }
+  }
+  let notes_ok = seen_notes.len() > 0 && final_notes.len() > 0 && all_notes_prefixed && leaked_notes.len() == 0;
+  let sample_note = final_notes.len() > 0 ? final_notes.get(0, "") : "";
+  check(notes_ok,
+    f"{label_prefix} Value Comments (.sv-note)",
+    notes_ok ? f"{str(seen_notes.len())} distinct notes seen ({str(final_notes.len())} at end, e.g. '{sample_note}'), 0 leaked internals"
+             : f"seen={str(seen_notes.len())}, final={str(final_notes.len())}, prefixed={str(all_notes_prefixed)}, leaks=[{join(leaked_notes, '; ')}]");
+
+  # 5d. Example Output Matches Recorded Output (data/<example>.json)
+  let rec_status = pr.get("recordingStatus", 0);
+  let out_ver = pr.get("outputVerification", {});
+  let out_matches = out_ver.get("outputMatchesRecording", false);
+  let rec_out_count = out_ver.get("recordedOutputCount", 0);
+  let seen_out_count = out_ver.get("seenOutNotesCount", 0);
+  let unmatched_outs = out_ver.get("unmatchedOutputs", []);
+  let out_sample = out_ver.get("seenOutNotesSample", []);
+  let out_ok = rec_status == 200 && out_matches;
+
+  check(out_ok,
+    f"{label_prefix} Output Matches Recording (data/{p_ex}.json)",
+    out_ok ? f"recordedOutputs={str(rec_out_count)}, seenOutNotes={str(seen_out_count)} ({join(out_sample, ' | ')})"
+           : f"recordingStatus={str(rec_status)}, recordedOutputs={str(rec_out_count)}, seenOutNotes={str(seen_out_count)}, unmatched=[{join(unmatched_outs, '; ')}]");
+
+  # 5e. Step Button State Change
+  let step_info = pr.get("step", {});
+  let step_state = step_info.get("state", "");
+  let step_num = step_info.get("stepNum", "");
+  let step_rs = step_info.get("rsText", "");
+  let step_cur = step_info.get("hasCurrentLine", false);
+  let step_hl = step_info.get("highlightVisible", false);
+  let step_ok = step_state == "stepping" && step_num == "1" && step_rs == "▶ Running" && step_cur && step_hl;
+
+  check(step_ok,
+    f"{label_prefix} Step State Change",
+    step_ok ? f"state='{step_state}', step={step_num}, rs='{step_rs}', currentLine=true, highlightVisible=true"
+            : f"state='{step_state}', step='{step_num}', rs='{step_rs}', currentLine={str(step_cur)}, highlight={str(step_hl)}");
+
+  # 5f. Edit Button State Change
+  let edit_info = pr.get("edit", {});
+  let edit_state = edit_info.get("state", "");
+  let edit_rs = edit_info.get("rsText", "");
+  let edit_vis = edit_info.get("textareaVisible", false);
+  let edit_match = edit_info.get("matchesRecordedSource", false);
+  let edit_pressed = edit_info.get("ariaPressed", "");
+  let edit_len = edit_info.get("valueLength", 0);
+  let edit_ok = edit_state == "edit" && edit_rs == "○ Not started" && edit_vis && edit_match && edit_pressed == "true";
+
+  check(edit_ok,
+    f"{label_prefix} Edit State Change",
+    edit_ok ? f"state='{edit_state}', rs='{edit_rs}', textareaVisible=true, sourceChars={str(edit_len)} (matches recording), aria-pressed='{edit_pressed}'"
+            : f"state='{edit_state}', rs='{edit_rs}', visible={str(edit_vis)}, matchesSource={str(edit_match)}, ariaPressed='{edit_pressed}'");
+
+  # 5g. Pager prev/next/All-pages & Live Click Navigation
+  let nav_info = pr.get("nav", {});
+  let prev_obj = nav_info.get("prev", null);
+  let next_obj = nav_info.get("next", null);
+  let all_obj = nav_info.get("allPages", null);
+  let crumbs_list = nav_info.get("crumbs", []);
+
+  let has_all_pages = all_obj != null && all_obj.get("path", "") == book_prefix;
+  let prev_valid = prev_obj == null ? true : (starts_with(prev_obj.get("path", ""), book_prefix) && prev_obj.get("path", "") != book_prefix);
+  let next_valid = next_obj == null ? true : (starts_with(next_obj.get("path", ""), book_prefix) && next_obj.get("path", "") != book_prefix);
+  let has_prev_or_next = prev_obj != null || next_obj != null;
+  let first_last_bounds_ok = (is_first ? next_obj != null : true) && (is_last ? prev_obj != null : true);
+  let has_crumbs_ok = crumbs_list.len() > 0;
+
+  let click_res = pr.get("pagerClickResult", null);
+  let click_ok = true;
+  let click_detail = "links verified";
+  if (is_first || is_last) {
+    if (click_res == null) {
+      click_ok = false;
+      click_detail = "missing pagerClickResult";
+    } else {
+      let c_dir = click_res.get("direction", "");
+      let c_exp = click_res.get("expectedPath", "");
+      let c_act = click_res.get("actualPath", "");
+      let c_st = click_res.get("status", 0);
+      let c_h1 = click_res.get("h1", "");
+      click_ok = c_exp != "" && c_exp == c_act && c_st == 200 && c_h1 != "";
+      click_detail = f"clicked rel='{c_dir}' -> '{c_act}' (HTTP {str(c_st)}, h1='{c_h1}')";
+    }
+  } else {
+    let prev_p = prev_obj != null ? prev_obj.get("path", "") : "none";
+    let next_p = next_obj != null ? next_obj.get("path", "") : "none";
+    click_detail = f"prev='{prev_p}', next='{next_p}', allPages='{all_obj != null ? all_obj.get('path', '') : 'none'}'";
+  }
+
+  let pager_ok = has_all_pages && prev_valid && next_valid && has_prev_or_next && first_last_bounds_ok && has_crumbs_ok && click_ok;
+  check(pager_ok,
+    f"{label_prefix} Pager prev/next & Breadcrumbs",
+    pager_ok ? click_detail
+             : f"allPages={str(has_all_pages)}, prevValid={str(prev_valid)}, nextValid={str(next_valid)}, prevOrNext={str(has_prev_or_next)}, crumbs={str(has_crumbs_ok)}, click=({click_detail})");
+
+  # 5h. Zero Console Errors, Page Errors, or Failed HTTP Requests
+  let c_errs = pr.get("consoleErrors", []);
+  let p_errs = pr.get("pageErrors", []);
+  let f_reqs = pr.get("failedRequests", []);
+  let clean_ok = c_errs.len() == 0 && p_errs.len() == 0 && f_reqs.len() == 0;
+  check(clean_ok,
+    f"{label_prefix} No Console Errors or Failed Requests",
+    clean_ok ? "0 console.error, 0 pageerror, 0 failed HTTP requests"
+             : f"consoleErrors=[{join(c_errs, '; ')}], pageErrors=[{join(p_errs, '; ')}], failedRequests=[{join(f_reqs, '; ')}]");
+}
+
+# -----------------------------------------------------------------------------
+# 6. Write JSON & Text Reports and Exit
+# -----------------------------------------------------------------------------
+let total_passed = stats.get("pass", 0);
+let total_failed = stats.get("fail", 0);
+log_line("==================================================");
+log_line(f"Chrome QA Summary ({book} @ {host}, {str(sampled_pages.len())} pages): {str(total_passed)} passed, {str(total_failed)} failed");
+log_line("==================================================");
+
+let report_obj = {
+  suite: "egtry-chrome",
+  book: book,
+  host: host,
+  seed: seed,
+  totalLessons: total_lessons,
+  sampledCount: sampled_pages.len(),
+  sampledSlugs: sampled_slugs,
+  passed: total_passed,
+  failed: total_failed,
+  status: total_failed == 0 ? "PASS" : "FAIL",
+  checks: checks_list
+};
+
+let report_json_str = json_stringify(report_obj) + "\n";
+let report_txt_str = join(report_lines, "\n") + "\n";
+
+write_file(f"work/chrome_report_{book}.json", report_json_str);
+write_file("work/chrome_report.json", report_json_str);
+write_file(f"work/chrome_report_{book}.txt", report_txt_str);
+write_file("work/chrome_report.txt", report_txt_str);
+
+if (total_failed > 0) {
+  exit(1);
+} else {
+  exit(0);
+}
