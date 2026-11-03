@@ -44,7 +44,7 @@ Reusable `lmscript` + `lmhtml` integration test suite for verifying `egtry.com` 
 ./run.sh --home --host www.egtry.com
 ./run.sh --home --host v2.egtry.com
 ./run.sh --home --host www.egtry.com --seed 3 --autoplay-count 4 --sample-count 40 --min-fit-pct 95
-./run.sh --home --host www.egtry.com --forbid-hero-words "books,tex,katex"
+./run.sh --home --host www.egtry.com --forbid-hero-words "book,books,tex,katex,static math" --expected-title "Egtry: learn by watching code run"
 ./run.sh --home --host www.egtry.com --allow-legacy-hero
 ```
 
@@ -53,7 +53,7 @@ Reusable `lmscript` + `lmhtml` integration test suite for verifying `egtry.com` 
 Pass `--home` to `./run.sh` (or run `lmscript home.lms --host <host> [options]`) to run the repeatable R37 homepage QA suite (`docs/design/simple-viewer/15-homepage.md`) in headless Chrome via Playwright under `flock /tmp/browser-gate.lock`:
 
 1. **Static DOM & Structure (`curl` + `lmhtml` + Chrome)**: Verifies `<header class="home-hero">`, `section#player.home-player[aria-label="Example player"]`, `section#tracks.tracks` (`>= 14` track cards), `<footer>`, absence of `"Featured diagrams"` / `.featured`, and standard player controls (`Run`, `Step`, `⚙` visible; `Edit` hidden; `Next` hidden in `auto` mode).
-2. **Hero Copy Wording (Configurable Params)**: Verifies visible text in `.home-hero` against `--forbid-hero-words <csv>` (default: `"books,tex,katex"`, or pass `--allow-legacy-hero` to allow pre-polish wording) and `--require-hero-words <csv>`.
+2. **Hero Copy Wording & Title (Configurable Params)**: Verifies document `<title>` against `--expected-title` (default: `"Egtry: learn by watching code run"`), and visible text in `.home-hero` against `--forbid-hero-words <csv>` (default: `"book,books,tex,katex,static math"`, or pass `--allow-legacy-hero` to allow pre-polish wording) and `--require-hero-words <csv>` (default: `"interactive lessons,19 programming languages,14 tracks"`).
 3. **Page Weight Before Player Loads**: Measures decoded byte weight of HTML + CSS + static JS modules before `books.json`, `pages/<book>.json`, or `data/<example>.json` are fetched (`<= 120 KB`, all `HTTP 200`).
 4. **Responsive Layout (`1280×900` and `600×900`)**: Verifies zero horizontal overflow (`scrollWidth <= innerWidth`) and bounded player width at both `1280 px` and `600 px`.
 5. **Autoplay Sequence (`>= 4` Examples in a Row)**: Verifies the player autoplays `>= 4` distinct examples in a row across different books with `~3 s` pauses between examples, `.sv-rs` cycling through `▶ Running` -> `■ Ended`, and clean `.sv-note` value comments (`0` leaked internals).
@@ -61,7 +61,7 @@ Pass `--home` to `./run.sh` (or run `lmscript home.lms --host <host> [options]`)
 7. **`Step`, `Next`, No Way Back, & Refresh**: Verifies clicking `Step` stops autoplay permanently (`data-mode="manual"`) and shows `Next`; completing an example in manual mode stays put after `> 3.5 s` (no way back to autoplay); clicking `Next` loads a different example in `data-state="ready"` (`○ Not started`) without auto-starting; and refreshing the page restores `data-mode="auto"` and restarts autoplay.
 8. **`prefers-reduced-motion: reduce`**: Verifies reduced-motion starts in `data-mode="manual"` with `Next` visible and `data-state="ready"` (`○ Not started`), without autoplay.
 9. **Blocked Example Fetch Recovery**: Verifies an `HTTP 500` on the first example recording request is skipped and the player seamlessly loads and plays another example with `.sv-error` hidden.
-10. **Player Window Fit (`>= 95%` of `40` Sampled Examples Without Internal Scrolling)**: Samples `40` examples in the homepage player window at `1280 px` and `600 px` and verifies `>= 95%` fit without internal scrolling.
+10. **Player Window Fit (`12–26` Rows, `>= 95%` of `40` Sampled Examples Without Internal Scrolling)**: Samples `40` examples in the homepage player window at `1280 px` and `600 px` and verifies all `40/40` example windows have heights within `12–26` rows (`268–562 px`) and `>= 95%` fit without internal scrolling.
 11. **Site-Wide Non-Regression URLs**: Verifies `/`, `/index.html`, `/books/`, `5` track pages, `3` non-programming book pages, `/python/`, `/go/`, and `/tracks/programming-languages/` all return `HTTP 200` with `100%` of their CSS/JS subresources returning `HTTP 200` and `0` console errors.
 12. **Reports**: Outputs `[PASS]` / `[FAIL]` per check, writes JSON and text reports to `work/home_report_<host>.json` (`.txt`) and `work/home_report.json` (`.txt`), and exits non-zero on any failure.
 

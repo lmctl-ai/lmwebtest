@@ -886,7 +886,11 @@ async function main() {
 
       let fitsCount = 0;
       let noScrollPlanCount = 0;
+      let within12To26RowsCount = 0;
+      let minRowsSeen = 999;
+      let maxRowsSeen = 0;
       const overflowed = [];
+      const outOfRowBounds = [];
 
       for (let i = 0; i < sampleCount; i++) {
         const info = await rmPage.evaluate(async () => {
@@ -894,6 +898,13 @@ async function main() {
           const sv = stage.querySelector('.sv');
           const win = sv.querySelector('.sv-window');
           const linesCount = sv.querySelectorAll('.sv-line').length;
+          const styleHeightPx = parseFloat(win.style.height) || win.clientHeight + 2;
+          const windowRows = Math.round((styleHeightPx - 16) / 21);
+          const within12To26Rows =
+            windowRows >= 12 &&
+            windowRows <= 26 &&
+            win.clientHeight >= 12 * 21 + 14 &&
+            win.clientHeight <= 26 * 21 + 16;
           // Note: home-base.css sets `* { box-sizing: border-box }` and `.sv-window` has a 1px top+bottom border (2px total),
           // so an exact-fit window has `scrollHeight - clientHeight <= 2`.
           const readyFits = win.scrollHeight <= win.clientHeight + 2;
@@ -907,6 +918,9 @@ async function main() {
             exampleId: sv.dataset.example || '',
             title: (stage.querySelector('.home-player__title')?.textContent || '').trim(),
             linesCount,
+            styleHeightPx,
+            windowRows,
+            within12To26Rows,
             scrollHeight: win.scrollHeight,
             clientHeight: win.clientHeight,
             scrollMoves: scrolls.length,
@@ -914,6 +928,11 @@ async function main() {
             noScrollMoves,
           };
         });
+
+        if (info.windowRows < minRowsSeen) minRowsSeen = info.windowRows;
+        if (info.windowRows > maxRowsSeen) maxRowsSeen = info.windowRows;
+        if (info.within12To26Rows) within12To26RowsCount++;
+        else outOfRowBounds.push({ index: i + 1, ...info });
 
         if (info.fitsWindow) fitsCount++;
         else overflowed.push({ index: i + 1, ...info });
@@ -938,7 +957,11 @@ async function main() {
         fitPct: +(fitsCount / sampleCount * 100).toFixed(1),
         noScrollPlanCount,
         noScrollPlanPct: +(noScrollPlanCount / sampleCount * 100).toFixed(1),
+        within12To26RowsCount,
+        minRowsSeen,
+        maxRowsSeen,
         overflowed,
+        outOfRowBounds,
       };
     }
 
@@ -951,12 +974,20 @@ async function main() {
       fitPct1280: fit1280.fitPct,
       noScrollPlan1280Count: fit1280.noScrollPlanCount,
       noScrollPlanPct1280: fit1280.noScrollPlanPct,
+      within12To26Rows1280Count: fit1280.within12To26RowsCount,
+      minRows1280: fit1280.minRowsSeen,
+      maxRows1280: fit1280.maxRowsSeen,
       fits600Count: fit600.fitsCount,
       fitPct600: fit600.fitPct,
       noScrollPlan600Count: fit600.noScrollPlanCount,
       noScrollPlanPct600: fit600.noScrollPlanPct,
+      within12To26Rows600Count: fit600.within12To26RowsCount,
+      minRows600: fit600.minRowsSeen,
+      maxRows600: fit600.maxRowsSeen,
       overflowedExamples1280: fit1280.overflowed,
       overflowedExamples600: fit600.overflowed,
+      outOfRowBounds1280: fit1280.outOfRowBounds,
+      outOfRowBounds600: fit600.outOfRowBounds,
     };
 
     await rmContext.close();

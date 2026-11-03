@@ -102,8 +102,9 @@ let seed_str = env("EGTRY_SEED", "3");
 let autoplay_str = env("EGTRY_AUTOPLAY_COUNT", "4");
 let sample_str = env("EGTRY_SAMPLE_COUNT", "40");
 let min_fit_str = env("EGTRY_MIN_FIT_PCT", "95");
-let forbid_hero_str = env("EGTRY_FORBID_HERO_WORDS", "books,tex,katex");
-let require_hero_str = env("EGTRY_REQUIRE_HERO_WORDS", "");
+let forbid_hero_str = env("EGTRY_FORBID_HERO_WORDS", "book,books,tex,katex,static math");
+let require_hero_str = env("EGTRY_REQUIRE_HERO_WORDS", "interactive lessons,19 programming languages,14 tracks");
+let expected_title = env("EGTRY_EXPECTED_TITLE", "Egtry: learn by watching code run");
 let max_pre_kb_str = env("EGTRY_MAX_PRE_PLAYER_KB", "120");
 let allow_legacy_hero = false;
 
@@ -133,6 +134,9 @@ for (ai in range(0, args.len())) {
   if ((arg == "--require-hero-words" || arg == "--hero-require") && ai + 1 < args.len()) {
     require_hero_str = args.get(ai + 1, "");
   }
+  if (arg == "--expected-title" && ai + 1 < args.len()) {
+    expected_title = args.get(ai + 1, "");
+  }
   if (arg == "--allow-legacy-hero") {
     allow_legacy_hero = true;
   }
@@ -143,6 +147,8 @@ for (ai in range(0, args.len())) {
 
 if (allow_legacy_hero) {
   forbid_hero_str = "";
+  require_hero_str = "";
+  expected_title = "";
 }
 
 let scheme = starts_with(trim(host_raw), "http://") ? "http" : "https";   # a local candidate is served over http (python3 -m http.server)
@@ -399,11 +405,13 @@ for (rwi in range(0, require_hero_words.len())) {
     push(missing_required, rw);
   }
 }
-let hero_wording_ok = hero_vis != "" && found_forbidden.len() == 0 && missing_required.len() == 0;
+let actual_title = st.get("title", "");
+let title_ok = expected_title == "" ? (actual_title != "") : (actual_title == expected_title);
+let hero_wording_ok = hero_vis != "" && title_ok && found_forbidden.len() == 0 && missing_required.len() == 0;
 check(hero_wording_ok,
-  f"Hero Copy Wording (forbid=[{join(forbid_hero_words, ', ')}], require=[{join(require_hero_words, ', ')}])",
-  hero_wording_ok ? f"visible hero copy passed wording checks: '{hero_vis}'"
-                  : f"foundForbidden=[{join(found_forbidden, ', ')}], missingRequired=[{join(missing_required, ', ')}] in visible hero copy: '{hero_vis}'");
+  f"Title & Hero Copy Wording (title='{expected_title}', forbid=[{join(forbid_hero_words, ', ')}])",
+  hero_wording_ok ? f"title='{actual_title}', h1='{st.get('heroH1', '')}', hero copy='{hero_vis}'"
+                  : f"title='{actual_title}' (expected '{expected_title}'), foundForbidden=[{join(found_forbidden, ', ')}], missingRequired=[{join(missing_required, ', ')}] in '{hero_vis}'");
 
 # 3c. Page Weight Before Player Loads
 let pw_info = raw.get("pageWeight", {});
@@ -560,18 +568,26 @@ check(bfr_ok,
          : json_stringify(bfr));
 
 # -----------------------------------------------------------------------------
-# 9. Assert Player Window Shows >= min_fit_pct% of 40 Sampled Examples Without Scrolling
+# 9. Assert Player Window (12-26 rows) Shows >= min_fit_pct% of 40 Sampled Examples Without Scrolling
 # -----------------------------------------------------------------------------
 let wf = raw.get("windowFitSample", {});
 let wf_total = wf.get("sampleCount", 0);
 let wf_fits_1280 = wf.get("fits1280Count", 0);
 let wf_pct_1280 = wf.get("fitPct1280", 0);
-let wf_noscroll_1280 = wf.get("noScrollPlan1280Count", 0);
-let wf_noscroll_pct_1280 = wf.get("noScrollPlanPct1280", 0);
+let wf_rows_ok_1280 = wf.get("within12To26Rows1280Count", 0);
+let wf_min_r_1280 = wf.get("minRows1280", 0);
+let wf_max_r_1280 = wf.get("maxRows1280", 0);
 let wf_fits_600 = wf.get("fits600Count", 0);
 let wf_pct_600 = wf.get("fitPct600", 0);
-let wf_noscroll_600 = wf.get("noScrollPlan600Count", 0);
-let wf_noscroll_pct_600 = wf.get("noScrollPlanPct600", 0);
+let wf_rows_ok_600 = wf.get("within12To26Rows600Count", 0);
+let wf_min_r_600 = wf.get("minRows600", 0);
+let wf_max_r_600 = wf.get("maxRows600", 0);
+
+let wf_rows_bounds_ok = wf_total >= sample_count && wf_rows_ok_1280 == wf_total && wf_rows_ok_600 == wf_total;
+check(wf_rows_bounds_ok,
+  f"Player Window Height Bounds (12-26 rows across {str(sample_count)} sampled examples at 1280px & 600px)",
+  wf_rows_bounds_ok ? f"1280px: {str(wf_rows_ok_1280)}/{str(wf_total)} within 12-26 rows (observed {str(wf_min_r_1280)}..{str(wf_max_r_1280)} rows); 600px: {str(wf_rows_ok_600)}/{str(wf_total)} within 12-26 rows (observed {str(wf_min_r_600)}..{str(wf_max_r_600)} rows)"
+                    : f"1280px: {str(wf_rows_ok_1280)}/{str(wf_total)} ({str(wf_min_r_1280)}..{str(wf_max_r_1280)} rows); 600px: {str(wf_rows_ok_600)}/{str(wf_total)} ({str(wf_min_r_600)}..{str(wf_max_r_600)} rows)");
 
 let wf_ok = wf_total >= sample_count && wf_pct_1280 >= min_fit_pct && wf_pct_600 >= min_fit_pct;
 check(wf_ok,
