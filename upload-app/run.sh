@@ -10,15 +10,17 @@ for tool in node lmscript curl; do
   command -v "$tool" >/dev/null 2>&1 || { echo "Error: $tool is not on PATH" >&2; exit 1; }
 done
 
-# The test program calls `lmwebtest playwright`; use this checkout unless one is already on PATH.
-if ! command -v lmwebtest >/dev/null 2>&1; then
-  mkdir -p "$ROOT/bin"
-  printf '#!/bin/sh\nexec node "%s/src/cli.js" "$@"\n' "$ROOT" > "$ROOT/bin/lmwebtest"
-  chmod +x "$ROOT/bin/lmwebtest"
-  export PATH="$ROOT/bin:$PATH"
-fi
-
 ensure_lmmock "$ROOT" "$HERE"
+
+# The test program calls `lmwebtest playwright`. An lmwebtest already on PATH (the released executable, or
+# `npm link`) wins; otherwise use this checkout through a shim appended to the END of PATH.
+if ! command -v lmwebtest >/dev/null 2>&1; then
+  mkdir -p "$HERE/build/shim"
+  printf '#!/bin/sh\nexec node "%s/src/cli.js" "$@"\n' "$ROOT" > "$HERE/build/shim/lmwebtest"
+  chmod +x "$HERE/build/shim/lmwebtest"
+  export PATH="$PATH:$HERE/build/shim"
+fi
+echo "lmwebtest: $(command -v lmwebtest)"
 
 # The schema changes between lmmock releases; always export it from the binary in use.
 "$LMMOCK_BIN" schema > "$HERE/schema.json"

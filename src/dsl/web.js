@@ -1,4 +1,4 @@
-import { chromium } from 'playwright-core';
+import { chromium } from '@playwright/test';
 import { writeFileSync } from 'node:fs';
 import { StrList } from './std.js';
 import { checkBrowserError } from './browser-error.js';

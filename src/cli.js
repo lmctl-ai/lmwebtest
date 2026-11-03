@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
-import { chromium } from 'playwright-core';
+import { chromium, expect } from '@playwright/test';
 import { initSite, batchSites } from './sites.js';
 
 import pkg from '../package.json' with { type: 'json' };
@@ -23,17 +23,6 @@ export function checkBrowserError(error) {
     }
   }
   return error;
-}
-
-// Retries until the title matches, like Playwright's toHaveTitle, without loading the test runner.
-async function waitForTitle(page, expected, timeout) {
-  const deadline = Date.now() + timeout;
-  let actual = await page.title();
-  while (actual !== expected && Date.now() < deadline) {
-    await new Promise(resolve => setTimeout(resolve, 100));
-    actual = await page.title();
-  }
-  if (actual !== expected) throw new Error(`Expected title ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
 }
 
 const help = `Usage:
@@ -239,7 +228,7 @@ async function main() {
       if (result.status === Number(options.status) && result.status >= 400) {
         result.errors = result.errors.filter(error => error !== `HTTP ${result.status}: ${response.url()}`);
       }
-      if (options.title !== undefined) await waitForTitle(page, options.title, Number(options.timeout));
+      if (options.title !== undefined) await expect(page).toHaveTitle(options.title, { timeout: Number(options.timeout) });
       for (const selector of options.selector) await page.locator(selector).first().waitFor({ state: 'visible' });
       result.brokenImages = await page.locator('img').evaluateAll(images => images.filter(img => img.complete && img.naturalWidth === 0).map(img => img.currentSrc || img.src));
       if (result.brokenImages.length) result.errors.push(`${result.brokenImages.length} broken image(s)`);
