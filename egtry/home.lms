@@ -3,6 +3,7 @@
 # Usage:
 #   ./run.sh --home --host www.egtry.com
 #   ./run.sh --home --host https://v2.egtry.com
+#   ./run.sh --home --host http://127.0.0.1:8099   (a local candidate: python3 -m http.server 8099 in the site directory)
 #   lmscript home.lms --host <host> [--seed 3] [--autoplay-count 4] [--sample-count 40]
 #                     [--min-fit-pct 95] [--forbid-hero-words "books,tex,katex"]
 #                     [--require-hero-words ""] [--allow-legacy-hero] [--max-pre-player-kb 120]
@@ -144,6 +145,7 @@ if (allow_legacy_hero) {
   forbid_hero_str = "";
 }
 
+let scheme = starts_with(trim(host_raw), "http://") ? "http" : "https";   # a local candidate is served over http (python3 -m http.server)
 let host = normalize_host(host_raw);
 let site_host = site_host_raw != "" ? normalize_host(site_host_raw) : (host == "v2.egtry.com" ? "www.egtry.com" : host);
 let seed = parse_positive_int(seed_str, 3);
@@ -185,7 +187,7 @@ log_line(f"=== Homepage R37 QA Suite: host='{host}' seed={str(seed)} autoplay={s
 # 1. Static HTML Fetch (curl) & DOM Extraction via lmhtml (_lmcode_)
 # -----------------------------------------------------------------------------
 let home_html_path = "work/home_index.html";
-let home_url = f"https://{host}/";
+let home_url = f"{scheme}://{host}/";
 
 let curl_res = system([
   "curl", "-sS", "-L", "--max-time", "20", "--retry", "2",
@@ -323,6 +325,7 @@ let plan_path = f"work/home_plan_{safe_host_tag}.json";
 let raw_out_path = f"work/home_raw_{safe_host_tag}.json";
 
 write_file(plan_path, json_stringify({
+  scheme: scheme,
   host: host,
   siteHost: site_host,
   seed: seed,

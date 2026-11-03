@@ -49,13 +49,14 @@ const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
 const {
   host,
   siteHost = host,
+  scheme = 'https',
   seed = 3,
   autoplayCount = 4,
   sampleCount = 40,
   nonRegressionUrls = [],
 } = plan;
 
-const baseOrigin = `https://${host}`;
+const baseOrigin = `${scheme}://${host}`;
 
 function hasLeakedInternal(text) {
   if (!text) return null;
@@ -1002,7 +1003,7 @@ async function main() {
       regPageErrors = [];
       regSubresources = [];
       const itemHost = item.useSiteHost ? siteHost : host;
-      regTargetOrigin = `https://${itemHost}`;
+      regTargetOrigin = `${scheme}://${itemHost}`;
       const fullUrl = `${regTargetOrigin}${item.path}`;
 
       let docStatus = 0;
