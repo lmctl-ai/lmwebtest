@@ -10,12 +10,14 @@ Reusable `lmscript` + `lmhtml` integration test suite for verifying `egtry.com` 
 
 # Explicit book and host
 ./run.sh --book python --host www.egtry.com
+./run.sh --book bash --host www.egtry.com
 ./run.sh --book c --host www.egtry.com
 ./run.sh --book javascript --host www.egtry.com
 ./run.sh --book typescript --host www.egtry.com
 ./run.sh --book go --host www.egtry.com
 ./run.sh --book java --host www.egtry.com
 ./run.sh --book lua --host www.egtry.com
+./run.sh --book perl --host www.egtry.com
 ./run.sh --book php --host www.egtry.com
 ./run.sh --book ruby --host www.egtry.com
 ./run.sh --book rust --host www.egtry.com
