@@ -17,6 +17,7 @@ Reusable `lmscript` + `lmhtml` integration test suite for verifying `egtry.com` 
 ./run.sh --book typescript --host www.egtry.com
 ./run.sh --book go --host www.egtry.com
 ./run.sh --book java --host www.egtry.com
+./run.sh --book kotlin --host www.egtry.com
 ./run.sh --book lua --host www.egtry.com
 ./run.sh --book perl --host www.egtry.com
 ./run.sh --book php --host www.egtry.com
