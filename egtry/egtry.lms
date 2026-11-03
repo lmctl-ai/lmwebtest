@@ -371,7 +371,9 @@ let lmcode_res = run_lmcode(p, {
 let findings = [];
 let parse_ok = false;
 if (lmcode_res.get("ok", false) && file_exists("work/extracted.json")) {
-  let report_data = json_parse(read_file("work/extracted.json"));
+  let raw_extracted = read_file("work/extracted.json");
+  write_file("work/extracted_" + book + ".json", raw_extracted);
+  let report_data = json_parse(raw_extracted);
   findings = report_data.get("findings", []);
   if (findings.len() > 0) {
     parse_ok = true;
