@@ -36,18 +36,18 @@ class Bridge {
     this.flag = new Int32Array(this.sab);
     const { port1, port2 } = new MessageChannel();
     this.port = port1;
-    this.worker = new Worker(new URL(typeof Bun !== 'undefined' ? './playwright/worker.cjs' : './worker.cjs', import.meta.url), {
+    this.worker = new Worker(new URL('./worker.cjs', import.meta.url), {
       workerData: { sab: this.sab, port: port2 },
       transferList: [port2],
     });
   }
 
   /** Let the worker boot (Bun needs an event-loop turn on this thread) before any blocking call.
-   *  When compiled with `bun build --compile src/cli.js src/playwright/worker.cjs`, the worker is an embedded entrypoint. */
+   *  In the compiled executable the worker is an embedded entrypoint (scripts/build-binary.mjs). */
   ready() {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('Playwright worker did not start')), 30000);
-      this.port.once('message', () => { clearTimeout(timer); resolve(); });
+      this.port.once('message', () => { clearTimeout(timer); this.alive = true; resolve(); });
       this.worker.once('error', reject);
     });
   }
@@ -70,7 +70,9 @@ class Bridge {
   }
 
   async close() {
-    try { this.call({ op: 'shutdown' }); } catch {}
+    // Never block on a worker that did not start: Atomics.wait would hang forever.
+    if (this.alive)
+      try { this.call({ op: 'shutdown' }); } catch {}
     await this.worker.terminate();
     this.port.close();
   }
