@@ -400,26 +400,32 @@ let tracks_status = tracks.get("status", 0);
 let tracks_has_link = tracks.get("hasBookLink", false);
 let tracks_clicked_path = tracks.get("clickedPath", "");
 let tracks_clicked_status = tracks.get("clickedStatus", 0);
-let tracks_errs = tracks.get("consoleErrors", []).len() + tracks.get("pageErrors", []).len() + tracks.get("failedRequests", []).len();
+let tracks_c_errs = tracks.get("consoleErrors", []);
+let tracks_p_errs = tracks.get("pageErrors", []);
+let tracks_f_reqs = tracks.get("failedRequests", []);
+let tracks_errs = tracks_c_errs.len() + tracks_p_errs.len() + tracks_f_reqs.len();
 
 let tracks_ok = tracks_status == 200 && tracks_has_link && tracks_clicked_path == book_prefix && tracks_clicked_status == 200 && tracks_errs == 0;
 check(tracks_ok,
   f"Tracks Page ({track_path}) -> {book_prefix} Link",
   tracks_ok ? f"HTTP 200, link '{tracks.get('bookLinkHref', '')}' clicked -> '{tracks_clicked_path}' (HTTP {str(tracks_clicked_status)}), 0 console/network errors"
-            : f"status={str(tracks_status)}, hasLink={str(tracks_has_link)}, clickedPath='{tracks_clicked_path}' ({str(tracks_clicked_status)}), errors={str(tracks_errs)}");
+            : f"status={str(tracks_status)}, hasLink={str(tracks_has_link)}, clickedPath='{tracks_clicked_path}' ({str(tracks_clicked_status)}), errors={str(tracks_errs)}, failedRequests=[{join(tracks_f_reqs, '; ')}]");
 
 let bidx = raw.get("bookIndex", {});
 let bidx_status = bidx.get("status", 0);
 let bidx_title = bidx.get("title", "");
 let bidx_h1 = bidx.get("h1", "");
 let bidx_lessons = bidx.get("lessonLinkCount", 0);
-let bidx_errs = bidx.get("consoleErrors", []).len() + bidx.get("pageErrors", []).len() + bidx.get("failedRequests", []).len();
+let bidx_c_errs = bidx.get("consoleErrors", []);
+let bidx_p_errs = bidx.get("pageErrors", []);
+let bidx_f_reqs = bidx.get("failedRequests", []);
+let bidx_errs = bidx_c_errs.len() + bidx_p_errs.len() + bidx_f_reqs.len();
 
 let bidx_ok = bidx_status == 200 && bidx_title != "" && bidx_h1 != "" && bidx_lessons == total_lessons && bidx_errs == 0;
 check(bidx_ok,
   f"Book Index ({book_prefix}) in Chrome",
   bidx_ok ? f"HTTP 200, h1='{bidx_h1}', {str(bidx_lessons)} lesson links, 0 console/network errors"
-          : f"status={str(bidx_status)}, h1='{bidx_h1}', lessons={str(bidx_lessons)}/{str(total_lessons)}, errors={str(bidx_errs)}");
+          : f"status={str(bidx_status)}, h1='{bidx_h1}', lessons={str(bidx_lessons)}/{str(total_lessons)}, errors={str(bidx_errs)}, failedRequests=[{join(bidx_f_reqs, '; ')}]");
 
 # -----------------------------------------------------------------------------
 # 5. Assert Per-Page Checks Across All N Sampled Pages

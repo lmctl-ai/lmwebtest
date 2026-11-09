@@ -204,7 +204,7 @@ async function main() {
     resetDiagnostics();
     const tracksUrl = `${tracksOrigin}${trackPath}`;
     const tracksResp = await page.goto(tracksUrl, {
-      waitUntil: 'domcontentloaded',
+      waitUntil: 'networkidle',
       timeout: 30000,
     });
     const tracksStatus = tracksResp ? tracksResp.status() : 0;
