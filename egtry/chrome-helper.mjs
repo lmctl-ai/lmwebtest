@@ -305,7 +305,9 @@ async function main() {
             u.origin === location.origin &&
             u.pathname.startsWith(prefix) &&
             u.pathname !== prefix &&
-            u.pathname.endsWith('/')
+            u.pathname.endsWith('/') &&
+            !u.pathname.endsWith('/playground/') &&
+            !u.pathname.endsWith('/assets/')
           ) {
             if (!seen.has(u.pathname)) {
               seen.add(u.pathname);
@@ -413,13 +415,22 @@ async function main() {
 
         const mbAll = Array.from(document.querySelectorAll('.mb[data-example]'));
         if (mbAll.length > 0) {
-          const mb =
+          let mb =
             mbAll.find((el) => {
               const m = (el.querySelector('.mb-steps')?.textContent || '').match(/^(\d+)\s+steps/i);
               return m && Number(m[1]) >= 2;
             }) ||
             mbAll.find((el) => el.querySelector('.mb-rs')) ||
+            mbAll.find((el) => el.dataset.view === 'practice') ||
             mbAll[0];
+          const levelSel = mb.querySelector('select.mp-level');
+          if (
+            levelSel &&
+            (mb.querySelector('.mb-steps')?.textContent || '').trim() === '1 steps'
+          ) {
+            levelSel.value = 'beginner';
+            levelSel.dispatchEvent(new Event('change'));
+          }
           const exampleId = mb.dataset.example || '';
           const rs = mb.querySelector('.mb-rs');
           const barBtns = Array.from(mb.querySelectorAll('.mb-bar button'));

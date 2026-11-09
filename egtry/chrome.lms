@@ -274,7 +274,7 @@ for (li in range(0, findings.len())) {
     # "/<book>/<slug>/" splits into ["", book, slug, ""] (length 4)
     if (segs.len() == 4) {
       let slug = segs.get(2, "");
-      if (slug != "" && seen_lesson_map.get(resolved, "") == "") {
+      if (slug != "" && slug != "playground" && slug != "assets" && seen_lesson_map.get(resolved, "") == "") {
         seen_lesson_map[resolved] = "1";
         push(all_lessons, {
           slug: slug,

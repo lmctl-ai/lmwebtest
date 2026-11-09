@@ -28,6 +28,8 @@ Reusable `lmscript` + `lmhtml` integration test suite for verifying `egtry.com` 
 ./run.sh --book scala --host www.egtry.com
 ./run.sh --book sql --host www.egtry.com
 ./run.sh --book swift --host www.egtry.com
+./run.sh --book arithmetic --host www.egtry.com
+./run.sh --book prealgebra --host www.egtry.com
 ./run.sh --book algebra --host www.egtry.com
 
 # Optional flags
