@@ -27,15 +27,18 @@ let math_books = [
   "arithmetic", "prealgebra", "algebra", "precalculus", "calculus",
   "linear-algebra", "numerical-methods", "probability-statistics", "analytic-geometry"
 ];
+let html_books = ["html", "css", "svg"];
 let is_math = contains(math_books, book);
-let track_path = is_math ? "/tracks/math/" : "/tracks/programming-languages/";
+let is_html = contains(html_books, book);
+let track_path = is_math ? "/tracks/math/" : (is_html ? "/tracks/web/" : "/tracks/programming-languages/");
 
 for (ai in range(0, args.len())) {
   let arg = args.get(ai, "");
   if (arg == "--book" && ai + 1 < args.len()) {
     book = args.get(ai + 1, book);
     is_math = contains(math_books, book);
-    track_path = is_math ? "/tracks/math/" : "/tracks/programming-languages/";
+    is_html = contains(html_books, book);
+    track_path = is_math ? "/tracks/math/" : (is_html ? "/tracks/web/" : "/tracks/programming-languages/");
   }
   if (arg == "--host" && ai + 1 < args.len()) {
     host = args.get(ai + 1, host);
@@ -329,6 +332,12 @@ for (d in range(0, docs.len())) {
     report.add("sv", pth, svs.len() + mn, ex_name + "|" + mb.attr("data-state"));
   }
 
+  let hbs = doc.select(".hb");
+  for (hn in range(0, hbs.len())) {
+    let hb = hbs.at(hn);
+    report.add("sv", pth, svs.len() + mbs.len() + hn, hb.attr("data-example") + "|" + hb.attr("data-state"));
+  }
+
   let runs = doc.select(".sv-run, #sv-run, button#run");
   for (r in range(0, runs.len())) {
     report.add("run_btn", pth, r, runs.at(r).text());
@@ -536,7 +545,7 @@ for (xi in range(0, kept_paths.len())) {
     let has_viewer_script = false;
     for (si in range(0, script_list.len())) {
       let sc = script_list.get(si, "");
-      if (contains(sc, "page.js") || contains(sc, "math.js")) {
+      if (contains(sc, "page.js") || contains(sc, "math.js") || contains(sc, "html.js")) {
         has_viewer_script = true;
       }
     }
@@ -549,8 +558,8 @@ for (xi in range(0, kept_paths.len())) {
 let examples_ok = missing_example_pages.len() == 0 && lesson_page_count > 0;
 check(examples_ok,
   f"Executable Examples & Run Viewer on Lesson Pages ({str(lesson_page_count)} pages)",
-  examples_ok ? f"all {str(lesson_page_count)} lesson pages have .sv/.mb[data-example] + viewer ({str(total_sv_examples)} total runnable examples)"
-              : f"missing .sv/.mb viewer on: {join(missing_example_pages, ', ')}");
+  examples_ok ? f"all {str(lesson_page_count)} lesson pages have .sv/.mb/.hb[data-example] + viewer ({str(total_sv_examples)} total runnable examples)"
+              : f"missing .sv/.mb/.hb viewer on: {join(missing_example_pages, ', ')}");
 
 # 4c. Collect all relative links, viewer scripts/CSS, and prev/next pager links
 let viewer_asset_paths = [];
@@ -565,7 +574,7 @@ for (li in range(0, kept_paths.len())) {
   let kp = kept_paths.get(li, "");
 
   # Example trace JSON endpoints (data/<example>.json)
-  if (!is_math) {
+  if (!is_math && !is_html) {
     let sv_items = page_svs.get(kp, []);
     for (svi in range(0, sv_items.len())) {
       let sv_parts = split(sv_items.get(svi, ""), "|");
@@ -720,12 +729,13 @@ for (edj in range(0, example_data_paths.len())) {
     push(failed_example_data, f"{edp2} (HTTP {edst})");
   }
 }
-let example_data_ok = is_math || (example_data_paths.len() > 0 && failed_example_data.len() == 0);
+let example_data_ok = is_math || is_html || (example_data_paths.len() > 0 && failed_example_data.len() == 0);
 check(example_data_ok,
   f"Example Trace JSON Endpoints HTTP 200 ({str(example_data_paths.len())} traces)",
   is_math ? "math books use in-browser dynamic procedural lowering (no pre-recorded JSON trace endpoints required)"
-          : (example_data_ok ? f"all {str(example_data_paths.len())} data/<example>.json endpoints responded HTTP 200"
-                             : f"{str(failed_example_data.len())} failed: {join(failed_example_data, ', ')}"));
+          : (is_html ? "HTML-track books embed inline show frames and scoped exercises in .hb-data (no separate JSON trace endpoints required)"
+                     : (example_data_ok ? f"all {str(example_data_paths.len())} data/<example>.json endpoints responded HTTP 200"
+                                        : f"{str(failed_example_data.len())} failed: {join(failed_example_data, ', ')}")));
 
 # 4e. Check Previous / Next / All-pages Navigation Links
 for (pli in range(0, kept_paths.len())) {

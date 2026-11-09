@@ -37,6 +37,9 @@ Reusable `lmscript` + `lmhtml` integration test suite for verifying `egtry.com` 
 ./run.sh --book numerical-methods --host www.egtry.com
 ./run.sh --book probability-statistics --host www.egtry.com
 ./run.sh --book analytic-geometry --host www.egtry.com
+./run.sh --book html --host www.egtry.com
+./run.sh --book css --host www.egtry.com
+./run.sh --book svg --host www.egtry.com
 
 # Optional flags
 ./run.sh --book c --host www.egtry.com \

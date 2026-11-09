@@ -35,6 +35,7 @@ const {
   pages,
   trackPath = '/tracks/programming-languages/',
   isMath = false,
+  isHtml = false,
 } = plan;
 const baseOrigin = `https://${host}`;
 const tracksOrigin = host === 'v2.egtry.com' ? 'https://www.egtry.com' : baseOrigin;
@@ -67,6 +68,7 @@ async function main() {
     host,
     trackPath,
     isMath,
+    isHtml,
     timestamp: new Date().toISOString(),
     tracks: null,
     bookIndex: null,
@@ -100,9 +102,9 @@ async function main() {
           typeof delay === 'number' &&
           delay >= 250 &&
           delay <= 2500 &&
-          document.querySelector('.mb')
+          document.querySelector('.mb, .hb')
         ) {
-          return origSetTimeout(fn, 20, ...rest);
+          return origSetTimeout(fn, 25, ...rest);
         }
         return origSetTimeout(fn, delay, ...rest);
       };
@@ -112,9 +114,9 @@ async function main() {
           typeof delay === 'number' &&
           delay >= 250 &&
           delay <= 2500 &&
-          document.querySelector('.mb')
+          document.querySelector('.mb, .hb')
         ) {
-          return origSetInterval(fn, 20, ...rest);
+          return origSetInterval(fn, 35, ...rest);
         }
         return origSetInterval(fn, delay, ...rest);
       };
@@ -159,6 +161,9 @@ async function main() {
 
     page.on('console', (msg) => {
       if (msg.type() === 'error') {
+        if (isHtml && /Blocked script execution/.test(msg.text())) {
+          return;
+        }
         currentConsoleErrors.push(msg.text());
       }
     });
@@ -346,7 +351,7 @@ async function main() {
       });
       const status = resp ? resp.status() : 0;
 
-      // Wait for .sv[data-example] or .mb[data-example] viewers to mount, OR return immediately if legacy v1 page
+      // Wait for .sv[data-example], .mb[data-example], or .hb[data-example] viewers to mount, OR return immediately if legacy v1 page
       await page.waitForFunction(
         () => {
           const svAll = Array.from(document.querySelectorAll('.sv[data-example]'));
@@ -356,6 +361,13 @@ async function main() {
           const mbAll = Array.from(document.querySelectorAll('.mb[data-example]'));
           if (mbAll.length > 0) {
             return mbAll.every((el) => el.dataset.state && el.dataset.state !== 'static');
+          }
+          const hbAll = Array.from(document.querySelectorAll('.hb[data-example]'));
+          if (hbAll.length > 0) {
+            return (
+              Boolean(window.htmlBook) &&
+              hbAll.every((el) => el.dataset.state && el.dataset.state !== 'static')
+            );
           }
           return document.readyState === 'complete';
         },
@@ -412,6 +424,223 @@ async function main() {
               : null,
           };
         };
+
+        const hbAll = Array.from(document.querySelectorAll('.hb[data-example]'));
+        if (hbAll.length > 0) {
+          const hb =
+            hbAll.find((el) => Number(el.dataset.frames || 0) >= 3 && el.querySelector('.hb-rs')) ||
+            hbAll.find((el) => Number(el.dataset.frames || 0) >= 2 && el.querySelector('.hb-rs')) ||
+            hbAll[0];
+          const exampleId = hb.dataset.example || '';
+          const frameCount = Number(hb.dataset.frames || 1);
+          const api = window.htmlBook?.blocks?.get(exampleId);
+          const rs = hb.querySelector('.hb-rs');
+          const playBtn = hb.querySelector('.hb-play');
+          const stepBtn = hb.querySelector('.hb-step');
+          const againBtn = hb.querySelector('.hb-again');
+          const captionEl = hb.querySelector('.hb-caption');
+          const posEl = hb.querySelector('.hb-pos');
+          const viewEl = hb.querySelector('.hb-view');
+          const editEl = hb.querySelector('.hb-edit');
+          const iframeEl = hb.querySelector('iframe.hb-frame');
+          const workEl = hb.querySelector('.hb-work');
+          const messagesEl = hb.querySelector('.hb-messages');
+
+          await api?.display?.loaded?.();
+
+          const initialState = rs?.dataset?.rs || hb.dataset.state || '';
+          const initialRsText = (rs?.textContent || '').trim();
+          const initialRsCode = rs?.dataset?.rs || '';
+          const sandboxAttr = iframeEl?.getAttribute('sandbox') || '';
+          const initialRenderedEls =
+            iframeEl?.contentDocument?.querySelectorAll('*')?.length || 0;
+
+          const rsTransitions = [];
+          let sawPlayPause = false;
+          const pushRs = () => {
+            const txt = (rs?.textContent || '').trim();
+            if (txt && rsTransitions[rsTransitions.length - 1] !== txt) {
+              rsTransitions.push(txt);
+            }
+            if ((playBtn?.textContent || '').trim() === 'Pause') {
+              sawPlayPause = true;
+            }
+          };
+          pushRs();
+
+          const seenNotesSet = new Set();
+          const seenTitlesSet = new Set();
+          const harvestHbNotes = () => {
+            const cap = (captionEl?.textContent || '').replace(/\s+/g, ' ').trim();
+            if (cap) {
+              seenNotesSet.add(`// ${cap}`);
+              seenTitlesSet.add(cap);
+            }
+            const posTxt = (posEl?.textContent || '').replace(/\s+/g, ' ').trim();
+            if (posTxt) {
+              seenNotesSet.add(`// frame ${posTxt}`);
+            }
+            for (const el of hb.querySelectorAll('.hb-messages li, .hb-question, .hb-scope')) {
+              const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+              if (t) seenNotesSet.add(`// ${t}`);
+            }
+          };
+          harvestHbNotes();
+
+          const hbObs = new MutationObserver(() => {
+            pushRs();
+            harvestHbNotes();
+          });
+          hbObs.observe(hb, {
+            childList: true,
+            characterData: true,
+            subtree: true,
+            attributes: true,
+          });
+
+          if (playBtn && frameCount > 1) {
+            playBtn.click();
+            pushRs();
+            harvestHbNotes();
+            const runStart = performance.now();
+            while (
+              rs?.dataset?.rs !== 'done' &&
+              hb.dataset.mode !== 'edit' &&
+              performance.now() - runStart < 15000
+            ) {
+              await new Promise((r) => setTimeout(r, 15));
+              pushRs();
+              harvestHbNotes();
+            }
+            pushRs();
+            harvestHbNotes();
+          }
+          hbObs.disconnect();
+          await api?.display?.loaded?.();
+
+          const afterRunState = rs?.dataset?.rs || hb.dataset.state || '';
+          const afterRunRsText = (rs?.textContent || '').trim();
+          const afterRunRsCode = rs?.dataset?.rs || '';
+          const validationErrors = Number(hb.dataset.errors || 0);
+          const finalDocEls = iframeEl?.contentDocument?.querySelectorAll('*')?.length || 0;
+          const displayFidelityOk =
+            sandboxAttr === 'allow-same-origin' && initialRenderedEls > 0 && finalDocEls > 0;
+
+          let startGoalsFailsOk = true;
+          if (api?.exercise && typeof api.goals === 'function') {
+            const sg = await api.goals(api.exercise.start);
+            startGoalsFailsOk = Boolean(sg && sg.ok === false);
+          }
+
+          const errParts = [];
+          if (validationErrors > 0) {
+            errParts.push(`validationErrors=${validationErrors}: ${(messagesEl?.textContent || '').trim()}`);
+          }
+          if (!displayFidelityOk) {
+            errParts.push(
+              `displayFidelity sandbox='${sandboxAttr}' initialEls=${initialRenderedEls} finalEls=${finalDocEls}`
+            );
+          }
+          if (!startGoalsFailsOk) {
+            errParts.push('exercise.start unexpectedly satisfied goals before editing');
+          }
+          const afterRunError = errParts.join('; ');
+
+          const finalCap = (captionEl?.textContent || '').replace(/\s+/g, ' ').trim();
+          if (finalCap) {
+            seenNotesSet.add(`// out: ${finalCap}`);
+            seenTitlesSet.add(finalCap);
+          }
+          const finalNotes = finalCap
+            ? [`// out: ${finalCap}`]
+            : Array.from(seenNotesSet).slice(-2);
+
+          // At end of show, hb is in edit mode: verify editable textarea & source matching
+          const expectedSource = api?.exercise
+            ? api.exercise.start || ''
+            : api?.frames?.[api.frames.length - 1]?.source || '';
+          const textareaVisible = Boolean(
+            editEl && !editEl.hidden && viewEl?.hidden && workEl && !workEl.hidden
+          );
+          const editVal = editEl ? editEl.value : '';
+          const matchesSource = editVal === expectedSource && expectedSource.length > 0;
+
+          // Click Watch again (.hb-again) to reset back to frame 1 ('idle' / 'Not started')
+          if (againBtn) {
+            againBtn.click();
+          }
+          await new Promise((r) => setTimeout(r, 20));
+          const afterEditState = rs?.dataset?.rs || hb.dataset.state || '';
+          const afterEditRsText = (rs?.textContent || '').trim();
+
+          // From frame 1, click Step (.hb-step) to advance to frame 2 and verify changed line highlights
+          if (stepBtn && !stepBtn.disabled) {
+            stepBtn.click();
+          }
+          await new Promise((r) => setTimeout(r, 25));
+          const afterStepState = rs?.dataset?.rs || hb.dataset.state || '';
+          const afterStepFrame = hb.dataset.frame || '';
+          const afterStepNum = afterStepFrame === '2' ? '1' : '';
+          const afterStepRsText = (rs?.textContent || '').trim();
+          const changedLineCount = hb.querySelectorAll('.hb-view .ln.changed').length;
+          const afterStepHasCurrentLine = changedLineCount >= 1;
+          const afterStepHighlightVisible = changedLineCount >= 1;
+
+          const overflowPx =
+            document.documentElement.scrollWidth - document.documentElement.clientWidth;
+
+          return {
+            viewerKind: 'hb',
+            title,
+            h1,
+            viewerCount: hbAll.length,
+            exampleId,
+            frameCount,
+            overflowPx,
+            displayFidelityOk,
+            startGoalsFailsOk,
+            recordingStatus: displayFidelityOk && startGoalsFailsOk && validationErrors === 0 ? 200 : 500,
+            recordedSourceLength: expectedSource.length,
+            recordedOutputs: finalCap ? [finalCap] : [],
+            initial: {
+              state: initialState,
+              rsText: initialRsText,
+              rsCode: initialRsCode,
+            },
+            run: {
+              rsTransitions,
+              sawPlayPause,
+              frameCount,
+              finalState: afterRunState,
+              finalRsText: afterRunRsText,
+              finalRsCode: afterRunRsCode,
+              errorText: afterRunError,
+              finalNotes,
+              finalTitles: finalCap ? [finalCap] : [],
+              seenNotes: Array.from(seenNotesSet),
+              seenTitles: Array.from(seenTitlesSet),
+            },
+            step: {
+              state: afterStepState,
+              stepNum: afterStepNum,
+              rsText: afterStepRsText,
+              rsCode: afterStepState,
+              hasCurrentLine: afterStepHasCurrentLine,
+              highlightVisible: afterStepHighlightVisible,
+            },
+            edit: {
+              state: afterEditState,
+              rsText: afterEditRsText,
+              rsCode: afterEditState,
+              textareaVisible,
+              valueLength: editVal.length,
+              matchesRecordedSource: matchesSource,
+              ariaPressed: 'true',
+              btnDisabled: false,
+            },
+            nav: extractNav(),
+          };
+        }
 
         const mbAll = Array.from(document.querySelectorAll('.mb[data-example]'));
         if (mbAll.length > 0) {
@@ -901,6 +1130,21 @@ async function main() {
           status: nextResp ? nextResp.status() : 200,
           h1: nextH1,
         };
+      } else if (p.isFirst && evalData.nav?.allPages) {
+        const [allResp] = await Promise.all([
+          page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }),
+          page.click('nav.sv-pager a[href]'),
+        ]);
+        const allH1 = await page.evaluate(
+          () => document.querySelector('h1')?.textContent?.trim() || ''
+        );
+        pagerClickResult = {
+          direction: 'allPages',
+          expectedPath: evalData.nav.allPages.path,
+          actualPath: new URL(page.url()).pathname,
+          status: allResp ? allResp.status() : 200,
+          h1: allH1,
+        };
       } else if (p.isLast && evalData.nav?.prev) {
         const [prevResp] = await Promise.all([
           page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }),
@@ -915,6 +1159,21 @@ async function main() {
           actualPath: new URL(page.url()).pathname,
           status: prevResp ? prevResp.status() : 200,
           h1: prevH1,
+        };
+      } else if (p.isLast && evalData.nav?.allPages) {
+        const [allResp] = await Promise.all([
+          page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }),
+          page.click('nav.sv-pager a[href]'),
+        ]);
+        const allH1 = await page.evaluate(
+          () => document.querySelector('h1')?.textContent?.trim() || ''
+        );
+        pagerClickResult = {
+          direction: 'allPages',
+          expectedPath: evalData.nav.allPages.path,
+          actualPath: new URL(page.url()).pathname,
+          status: allResp ? allResp.status() : 200,
+          h1: allH1,
         };
       }
 

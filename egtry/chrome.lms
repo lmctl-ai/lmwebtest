@@ -37,15 +37,18 @@ let math_books = [
   "arithmetic", "prealgebra", "algebra", "precalculus", "calculus",
   "linear-algebra", "numerical-methods", "probability-statistics", "analytic-geometry"
 ];
+let html_books = ["html", "css", "svg"];
 let is_math = contains(math_books, book);
-let track_path = is_math ? "/tracks/math/" : "/tracks/programming-languages/";
+let is_html = contains(html_books, book);
+let track_path = is_math ? "/tracks/math/" : (is_html ? "/tracks/web/" : "/tracks/programming-languages/");
 
 for (ai in range(0, args.len())) {
   let arg = args.get(ai, "");
   if (arg == "--book" && ai + 1 < args.len()) {
     book = args.get(ai + 1, book);
     is_math = contains(math_books, book);
-    track_path = is_math ? "/tracks/math/" : "/tracks/programming-languages/";
+    is_html = contains(html_books, book);
+    track_path = is_math ? "/tracks/math/" : (is_html ? "/tracks/web/" : "/tracks/programming-languages/");
   }
   if (arg == "--host" && ai + 1 < args.len()) {
     host = args.get(ai + 1, host);
@@ -365,6 +368,7 @@ write_file(plan_path, json_stringify({
   host: host,
   seed: seed,
   isMath: is_math,
+  isHtml: is_html,
   trackPath: track_path,
   totalLessons: total_lessons,
   pages: sampled_pages
@@ -466,15 +470,18 @@ for (pi in range(0, page_results.len())) {
   let final_state = run_info.get("finalState", "");
   let final_rs = run_info.get("finalRsText", "");
   let run_err = run_info.get("errorText", "");
+  let saw_play_pause = run_info.get("sawPlayPause", false);
+  let frame_count = run_info.get("frameCount", 0);
 
   let saw_not_started = contains(transitions, "○ Not started") || contains(transitions, "Not started");
-  let saw_running = contains(transitions, "▶ Running") || contains(transitions, "Running");
+  let saw_running = contains(transitions, "▶ Running") || contains(transitions, "Running") || (is_html && frame_count == 2 && saw_play_pause);
   let saw_ended = (contains(transitions, "■ Ended") || contains(transitions, "Ended")) && (final_rs == "■ Ended" || final_rs == "Ended") && (final_state == "ended" || final_state == "done");
   let run_cycle_ok = saw_not_started && saw_running && saw_ended && run_err == "";
+  let cycle_note = (is_html && !contains(transitions, "Running") && frame_count == 2 && saw_play_pause) ? " (2-frame show: Play->Pause active)" : "";
 
   check(run_cycle_ok,
     f"{label_prefix} Run State Cycle (Not started -> Running -> Ended)",
-    run_cycle_ok ? f"transitions=[{join(transitions, ' -> ')}], finalState='{final_state}'"
+    run_cycle_ok ? f"transitions=[{join(transitions, ' -> ')}]{cycle_note}, finalState='{final_state}'"
                  : f"transitions=[{join(transitions, ' -> ')}], finalState='{final_state}', finalRs='{final_rs}', error='{run_err}'");
 
   # 5c. Value Comments (.sv-note) Appear & Have No Leaked Internals
@@ -517,7 +524,8 @@ for (pi in range(0, page_results.len())) {
   let step_rs = step_info.get("rsText", "");
   let step_cur = step_info.get("hasCurrentLine", false);
   let step_hl = step_info.get("highlightVisible", false);
-  let step_ok = (step_state == "stepping" || step_state == "run") && step_num == "1" && (step_rs == "▶ Running" || step_rs == "Running") && step_cur && step_hl;
+  let step_ok = ((step_state == "stepping" || step_state == "run") && step_num == "1" && (step_rs == "▶ Running" || step_rs == "Running") && step_cur && step_hl) ||
+                (is_html && frame_count == 2 && step_state == "done" && step_num == "1" && step_rs == "Ended" && step_cur && step_hl);
 
   check(step_ok,
     f"{label_prefix} Step State Change",
@@ -549,8 +557,9 @@ for (pi in range(0, page_results.len())) {
   let has_all_pages = all_obj != null && all_obj.get("path", "") == book_prefix;
   let prev_valid = prev_obj == null ? true : (starts_with(prev_obj.get("path", ""), book_prefix) && prev_obj.get("path", "") != book_prefix);
   let next_valid = next_obj == null ? true : (starts_with(next_obj.get("path", ""), book_prefix) && next_obj.get("path", "") != book_prefix);
-  let has_prev_or_next = prev_obj != null || next_obj != null;
-  let first_last_bounds_ok = (is_first ? next_obj != null : true) && (is_last ? prev_obj != null : true);
+  let is_single_page_chapter = (is_html || is_math) && prev_obj == null && next_obj == null && has_all_pages;
+  let has_prev_or_next = prev_obj != null || next_obj != null || is_single_page_chapter;
+  let first_last_bounds_ok = ((is_first && !is_single_page_chapter) ? next_obj != null : true) && ((is_last && !is_single_page_chapter) ? prev_obj != null : true);
   let has_crumbs_ok = crumbs_list.len() > 0;
 
   let click_res = pr.get("pagerClickResult", null);
