@@ -29,8 +29,15 @@ if (!planPath || !outPath) {
 }
 
 const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
-const { book, host, pages } = plan;
+const {
+  book,
+  host,
+  pages,
+  trackPath = '/tracks/programming-languages/',
+  isMath = false,
+} = plan;
 const baseOrigin = `https://${host}`;
+const tracksOrigin = host === 'v2.egtry.com' ? 'https://www.egtry.com' : baseOrigin;
 const bookPrefix = `/${book}/`;
 
 function cutValue(s, maxLen = 40) {
@@ -46,6 +53,7 @@ function hasLeakedInternal(text) {
     '<object ',
     'Traceback (most recent',
     'undefined is not',
+    'NaN',
   ];
   for (const pat of patterns) {
     if (text.includes(pat)) return pat;
@@ -57,6 +65,8 @@ async function main() {
   const result = {
     book,
     host,
+    trackPath,
+    isMath,
     timestamp: new Date().toISOString(),
     tracks: null,
     bookIndex: null,
@@ -72,21 +82,47 @@ async function main() {
     });
 
     // Accelerate playback in Chrome while still stepping through every single frame
-    // in player.ts (MAX_FRAME_GAP = 250ms; at most one step starts per frame).
+    // in player.ts (MAX_FRAME_GAP = 250ms; at most one step starts per frame) and math.js (.mb).
     await context.addInitScript(() => {
       try {
         localStorage.setItem('egtry.simple.speed', 'fast');
       } catch {}
       const origRAF = window.requestAnimationFrame.bind(window);
       const origCAF = window.cancelAnimationFrame.bind(window);
+      const origSetTimeout = window.setTimeout.bind(window);
+      const origSetInterval = window.setInterval.bind(window);
       let virtualNow = performance.now();
       const fastIds = new Map();
       let nextId = 900000;
 
+      window.setTimeout = (fn, delay, ...rest) => {
+        if (
+          typeof delay === 'number' &&
+          delay >= 250 &&
+          delay <= 2500 &&
+          document.querySelector('.mb')
+        ) {
+          return origSetTimeout(fn, 20, ...rest);
+        }
+        return origSetTimeout(fn, delay, ...rest);
+      };
+
+      window.setInterval = (fn, delay, ...rest) => {
+        if (
+          typeof delay === 'number' &&
+          delay >= 250 &&
+          delay <= 2500 &&
+          document.querySelector('.mb')
+        ) {
+          return origSetInterval(fn, 20, ...rest);
+        }
+        return origSetInterval(fn, delay, ...rest);
+      };
+
       window.requestAnimationFrame = (cb) => {
         if (document.querySelector('.sv[data-state="playing"]')) {
           const id = ++nextId;
-          const tid = window.setTimeout(() => {
+          const tid = origSetTimeout(() => {
             fastIds.delete(id);
             const base = performance.now();
             if (virtualNow < base) virtualNow = base;
@@ -143,10 +179,30 @@ async function main() {
     });
 
     // -------------------------------------------------------------------------
-    // 1. Check /tracks/programming-languages/ and click the /<book>/ link
+    // 1. Check track page and click the /<book>/ link
     // -------------------------------------------------------------------------
+    let programmingLanguagesHasBook = null;
+    if (trackPath !== '/tracks/programming-languages/') {
+      resetDiagnostics();
+      const plResp = await page.goto(`${tracksOrigin}/tracks/programming-languages/`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+      });
+      if (plResp && plResp.status() === 200) {
+        programmingLanguagesHasBook = await page.evaluate((targetPath) => {
+          return Array.from(document.querySelectorAll('a[href]')).some((a) => {
+            try {
+              return new URL(a.getAttribute('href') || '', location.origin).pathname === targetPath;
+            } catch {
+              return false;
+            }
+          });
+        }, bookPrefix);
+      }
+    }
+
     resetDiagnostics();
-    const tracksUrl = `${baseOrigin}/tracks/programming-languages/`;
+    const tracksUrl = `${tracksOrigin}${trackPath}`;
     const tracksResp = await page.goto(tracksUrl, {
       waitUntil: 'domcontentloaded',
       timeout: 30000,
@@ -198,8 +254,21 @@ async function main() {
       clickedBookUrl = page.url();
     }
 
+    // If testing v2.egtry.com (where /tracks/* was fetched from www.egtry.com),
+    // navigate to https://v2.egtry.com/<book>/ for bookIndex inspection.
+    if (tracksOrigin !== baseOrigin) {
+      resetDiagnostics();
+      const v2IdxResp = await page.goto(`${baseOrigin}${bookPrefix}`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+      });
+      clickedBookStatus = v2IdxResp ? v2IdxResp.status() : clickedBookStatus;
+    }
+
     result.tracks = {
       url: tracksUrl,
+      trackPath,
+      programmingLanguagesHasBook,
       status: tracksStatus,
       title: tracksInfo.title,
       h1: tracksInfo.h1,
@@ -275,28 +344,304 @@ async function main() {
       });
       const status = resp ? resp.status() : 0;
 
-      // Wait for all .sv[data-example] viewers on the page to mount and reach data-state="ready"
+      // Wait for .sv[data-example] or .mb[data-example] viewers to mount, OR return immediately if legacy v1 page
       await page.waitForFunction(
         () => {
-          const all = Array.from(document.querySelectorAll('.sv[data-example]'));
-          return all.length > 0 && all.every((el) => el.dataset.state === 'ready');
+          const svAll = Array.from(document.querySelectorAll('.sv[data-example]'));
+          if (svAll.length > 0) {
+            return svAll.every((el) => el.dataset.state === 'ready');
+          }
+          const mbAll = Array.from(document.querySelectorAll('.mb[data-example]'));
+          if (mbAll.length > 0) {
+            return mbAll.every((el) => el.dataset.state && el.dataset.state !== 'static');
+          }
+          return document.readyState === 'complete';
         },
         { timeout: 15000 }
       );
 
-      // Run in-page lifecycle verification on the primary viewer (.sv):
-      //   1. Capture initial state ("ready", "○ Not started") & fetch data/<example>.json
-      //   2. Click Run (.sv-run) -> observe "○ Not started" -> "▶ Running" -> "■ Ended"
-      //      and capture all .sv-note and .sv-line[title] strings across the run
-      //   3. Click Step (.sv-step) -> verify data-state="stepping", data-step="1", "▶ Running", active line
-      //   4. Click Edit (.sv-edit-btn) -> verify data-state="edit", textarea visible with source, "○ Not started"
+      // Run in-page lifecycle verification on the primary viewer (.sv or .mb)
       const evalData = await page.evaluate(async () => {
         const title = document.title || '';
         const h1 = document.querySelector('h1')?.textContent?.trim() || '';
+        const resolvePath = (href) => {
+          if (!href) return '';
+          try {
+            return new URL(href, location.href).pathname;
+          } catch {
+            return href;
+          }
+        };
+        const extractNav = () => {
+          const crumbs = Array.from(document.querySelectorAll('nav.sv-crumbs a[href]')).map(
+            (a) => ({
+              text: (a.textContent || '').replace(/\s+/g, ' ').trim(),
+              href: a.getAttribute('href') || '',
+              path: resolvePath(a.getAttribute('href') || ''),
+            })
+          );
+          const prevAnchor = document.querySelector('nav.sv-pager a[rel="prev"]');
+          const nextAnchor = document.querySelector('nav.sv-pager a[rel="next"]');
+          const allPagesAnchor = Array.from(
+            document.querySelectorAll('nav.sv-pager a[href]')
+          ).find((a) => !a.getAttribute('rel'));
+          return {
+            crumbs,
+            prev: prevAnchor
+              ? {
+                  href: prevAnchor.getAttribute('href') || '',
+                  path: resolvePath(prevAnchor.getAttribute('href') || ''),
+                  text: (prevAnchor.textContent || '').replace(/\s+/g, ' ').trim(),
+                }
+              : null,
+            next: nextAnchor
+              ? {
+                  href: nextAnchor.getAttribute('href') || '',
+                  path: resolvePath(nextAnchor.getAttribute('href') || ''),
+                  text: (nextAnchor.textContent || '').replace(/\s+/g, ' ').trim(),
+                }
+              : null,
+            allPages: allPagesAnchor
+              ? {
+                  href: allPagesAnchor.getAttribute('href') || '',
+                  path: resolvePath(allPagesAnchor.getAttribute('href') || ''),
+                  text: (allPagesAnchor.textContent || '').replace(/\s+/g, ' ').trim(),
+                }
+              : null,
+          };
+        };
+
+        const mbAll = Array.from(document.querySelectorAll('.mb[data-example]'));
+        if (mbAll.length > 0) {
+          const mb =
+            mbAll.find((el) => {
+              const m = (el.querySelector('.mb-steps')?.textContent || '').match(/^(\d+)\s+steps/i);
+              return m && Number(m[1]) >= 2;
+            }) ||
+            mbAll.find((el) => el.querySelector('.mb-rs')) ||
+            mbAll[0];
+          const exampleId = mb.dataset.example || '';
+          const rs = mb.querySelector('.mb-rs');
+          const barBtns = Array.from(mb.querySelectorAll('.mb-bar button'));
+          const runBtn = barBtns.find((b) => (b.textContent || '').trim() === 'Run');
+          const stepBtn = barBtns.find((b) => (b.textContent || '').trim() === 'Step');
+          const backBtn = barBtns.find((b) => (b.textContent || '').trim() === 'Back');
+          const resetBtn = mb.querySelector('.mb-reset');
+          const captionEl = mb.querySelector('.mb-caption');
+          const stepsEl = mb.querySelector('.mb-steps');
+          const boardHost = mb.querySelector('.mp-board, .mb-paper');
+          const inputEl = mb.querySelector('.mp-input, .mb-num');
+
+          const initialState = rs?.dataset?.rs || mb.dataset.state || '';
+          const initialRsText = (rs?.textContent || '').trim();
+          const initialRsCode = rs?.dataset?.rs || '';
+          const recordedSource = mb.dataset.problem || mb.dataset.formulation || '';
+
+          const rsTransitions = [];
+          const pushRs = () => {
+            const txt = (rs?.textContent || '').trim();
+            if (txt && rsTransitions[rsTransitions.length - 1] !== txt) {
+              rsTransitions.push(txt);
+            }
+          };
+          pushRs();
+
+          const seenNotesSet = new Set();
+          const seenTitlesSet = new Set();
+          const harvestMbNotes = () => {
+            const cap = (captionEl?.textContent || '').replace(/\s+/g, ' ').trim();
+            if (cap) {
+              seenNotesSet.add(`// ${cap}`);
+              seenTitlesSet.add(cap);
+            }
+            for (const el of mb.querySelectorAll('.bb-note, .bb-explain, .bb-line, .mb-steps')) {
+              const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+              if (t) seenNotesSet.add(`// ${t}`);
+            }
+          };
+          harvestMbNotes();
+
+          const rsObs = new MutationObserver(() => {
+            pushRs();
+            harvestMbNotes();
+          });
+          rsObs.observe(mb, {
+            childList: true,
+            characterData: true,
+            subtree: true,
+            attributes: true,
+          });
+
+          if (runBtn) {
+            runBtn.click();
+            pushRs();
+            harvestMbNotes();
+            const runStart = performance.now();
+            while (
+              rs?.dataset?.rs !== 'done' &&
+              rs?.dataset?.rs !== 'error' &&
+              performance.now() - runStart < 15000
+            ) {
+              await new Promise((r) => setTimeout(r, 15));
+              pushRs();
+              harvestMbNotes();
+            }
+            pushRs();
+            harvestMbNotes();
+          }
+          rsObs.disconnect();
+
+          const afterRunState = rs?.dataset?.rs || mb.dataset.state || '';
+          const afterRunRsText = (rs?.textContent || '').trim();
+          const afterRunRsCode = rs?.dataset?.rs || '';
+          const finalCap = (captionEl?.textContent || '').replace(/\s+/g, ' ').trim();
+          const afterRunError =
+            afterRunState === 'error' || captionEl?.classList?.contains('error') ? finalCap : '';
+          if (finalCap) {
+            seenNotesSet.add(`// out: ${finalCap}`);
+            seenTitlesSet.add(finalCap);
+          }
+          const finalNotes = finalCap ? [`// out: ${finalCap}`] : Array.from(seenNotesSet).slice(-2);
+
+          // Reset to step 0 / idle, then test Step button
+          if (resetBtn) {
+            resetBtn.click();
+          } else {
+            let guard = 0;
+            while (backBtn && !backBtn.disabled && guard++ < 50) {
+              backBtn.click();
+            }
+          }
+          await new Promise((r) => setTimeout(r, 20));
+          if (stepBtn && !stepBtn.disabled) {
+            stepBtn.click();
+          }
+          await new Promise((r) => setTimeout(r, 25));
+          const afterStepState = rs?.dataset?.rs || mb.dataset.state || '';
+          const stepsLabel = (stepsEl?.textContent || '').trim();
+          const stepMatch = stepsLabel.match(/^step\s+(\d+)/i);
+          const afterStepNum = stepMatch ? stepMatch[1] : afterStepState === 'run' ? '1' : '';
+          const afterStepRsText = (rs?.textContent || '').trim();
+          const afterStepHasCurrentLine = Boolean(boardHost && boardHost.children.length > 0);
+          const afterStepHighlightVisible = Boolean(afterStepNum === '1');
+
+          // Check editable input & Reset back to Not started
+          const numInputs = Array.from(mb.querySelectorAll('.mb-num'));
+          let matchesSource = false;
+          let valLen = 0;
+          if (mb.querySelector('.mp-input')) {
+            const v = mb.querySelector('.mp-input').value;
+            valLen = v.length;
+            matchesSource = v === recordedSource && recordedSource.length > 0;
+          } else if (numInputs.length >= 2) {
+            const joined = numInputs.map((i) => i.value).join(',');
+            valLen = joined.length;
+            matchesSource = recordedSource.startsWith(numInputs[0].value) && valLen > 0;
+          }
+          if (resetBtn) {
+            resetBtn.click();
+          }
+          await new Promise((r) => setTimeout(r, 20));
+          const afterEditState = rs?.dataset?.rs || mb.dataset.state || '';
+          const afterEditRsText = (rs?.textContent || '').trim();
+
+          const appletEl = document.querySelector('.ma');
+          const overflowPx =
+            document.documentElement.scrollWidth - document.documentElement.clientWidth;
+
+          return {
+            viewerKind: 'mb',
+            title,
+            h1,
+            viewerCount: mbAll.length,
+            exampleId,
+            overflowPx,
+            applet: appletEl
+              ? {
+                  state: appletEl.dataset.state || '',
+                  score: (appletEl.querySelector('.ma-score')?.textContent || '').trim(),
+                }
+              : null,
+            recordingStatus: 200,
+            recordedSourceLength: recordedSource.length,
+            recordedOutputs: finalCap ? [finalCap] : [],
+            initial: {
+              state: initialState,
+              rsText: initialRsText,
+              rsCode: initialRsCode,
+            },
+            run: {
+              rsTransitions,
+              finalState: afterRunState,
+              finalRsText: afterRunRsText,
+              finalRsCode: afterRunRsCode,
+              errorText: afterRunError,
+              finalNotes,
+              finalTitles: finalCap ? [finalCap] : [],
+              seenNotes: Array.from(seenNotesSet),
+              seenTitles: Array.from(seenTitlesSet),
+            },
+            step: {
+              state: afterStepState,
+              stepNum: afterStepNum,
+              rsText: afterStepRsText,
+              rsCode: afterStepState,
+              hasCurrentLine: afterStepHasCurrentLine,
+              highlightVisible: afterStepHighlightVisible,
+            },
+            edit: {
+              state: afterEditState,
+              rsText: afterEditRsText,
+              rsCode: afterEditState,
+              textareaVisible: Boolean(inputEl),
+              valueLength: valLen,
+              matchesRecordedSource: matchesSource,
+              ariaPressed: 'true',
+              btnDisabled: false,
+            },
+            nav: extractNav(),
+          };
+        }
+
         const svAll = Array.from(document.querySelectorAll('.sv[data-example]'));
         const sv = svAll[0];
         if (!sv) {
-          return { error: 'No .sv[data-example] found on page', title, h1 };
+          return {
+            error: 'No .sv[data-example] or .mb[data-example] found on page (legacy v1 page)',
+            title,
+            h1,
+            viewerCount: 0,
+            exampleId: '',
+            recordingStatus: 0,
+            recordedOutputs: [],
+            initial: { state: '', rsText: '', rsCode: '' },
+            run: {
+              rsTransitions: [],
+              finalState: '',
+              finalRsText: '',
+              errorText: 'No v2 viewer (.sv or .mb) found on page',
+              finalNotes: [],
+              finalTitles: [],
+              seenNotes: [],
+              seenTitles: [],
+            },
+            step: {
+              state: '',
+              stepNum: '',
+              rsText: '',
+              hasCurrentLine: false,
+              highlightVisible: false,
+            },
+            edit: {
+              state: '',
+              rsText: '',
+              textareaVisible: false,
+              valueLength: 0,
+              matchesRecordedSource: false,
+              ariaPressed: '',
+            },
+            nav: extractNav(),
+          };
         }
 
         const exampleId = sv.dataset.example || '';
@@ -444,28 +789,6 @@ async function main() {
         const afterEditAriaPressed = editBtn.getAttribute('aria-pressed') || '';
         const afterEditBtnDisabled = Boolean(editBtn.disabled);
 
-        // Extract breadcrumbs and pager links
-        const resolvePath = (href) => {
-          if (!href) return '';
-          try {
-            return new URL(href, location.href).pathname;
-          } catch {
-            return href;
-          }
-        };
-        const crumbs = Array.from(document.querySelectorAll('nav.sv-crumbs a[href]')).map(
-          (a) => ({
-            text: (a.textContent || '').replace(/\s+/g, ' ').trim(),
-            href: a.getAttribute('href') || '',
-            path: resolvePath(a.getAttribute('href') || ''),
-          })
-        );
-        const prevAnchor = document.querySelector('nav.sv-pager a[rel="prev"]');
-        const nextAnchor = document.querySelector('nav.sv-pager a[rel="next"]');
-        const allPagesAnchor = Array.from(
-          document.querySelectorAll('nav.sv-pager a[href]')
-        ).find((a) => !a.getAttribute('rel'));
-
         return {
           title,
           h1,
@@ -508,30 +831,7 @@ async function main() {
             ariaPressed: afterEditAriaPressed,
             btnDisabled: afterEditBtnDisabled,
           },
-          nav: {
-            crumbs,
-            prev: prevAnchor
-              ? {
-                  href: prevAnchor.getAttribute('href') || '',
-                  path: resolvePath(prevAnchor.getAttribute('href') || ''),
-                  text: (prevAnchor.textContent || '').replace(/\s+/g, ' ').trim(),
-                }
-              : null,
-            next: nextAnchor
-              ? {
-                  href: nextAnchor.getAttribute('href') || '',
-                  path: resolvePath(nextAnchor.getAttribute('href') || ''),
-                  text: (nextAnchor.textContent || '').replace(/\s+/g, ' ').trim(),
-                }
-              : null,
-            allPages: allPagesAnchor
-              ? {
-                  href: allPagesAnchor.getAttribute('href') || '',
-                  path: resolvePath(allPagesAnchor.getAttribute('href') || ''),
-                  text: (allPagesAnchor.textContent || '').replace(/\s+/g, ' ').trim(),
-                }
-              : null,
-          },
+          nav: extractNav(),
         };
       });
 

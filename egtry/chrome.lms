@@ -33,11 +33,19 @@ let book = env("EGTRY_BOOK", "python");
 let host = env("EGTRY_HOST", "www.egtry.com");
 let pages_str = env("EGTRY_PAGES", "10");
 let seed_str = env("EGTRY_SEED", "");
+let math_books = [
+  "arithmetic", "prealgebra", "algebra", "precalculus", "calculus",
+  "linear-algebra", "numerical-methods", "probability-statistics", "analytic-geometry"
+];
+let is_math = contains(math_books, book);
+let track_path = is_math ? "/tracks/math/" : "/tracks/programming-languages/";
 
 for (ai in range(0, args.len())) {
   let arg = args.get(ai, "");
   if (arg == "--book" && ai + 1 < args.len()) {
     book = args.get(ai + 1, book);
+    is_math = contains(math_books, book);
+    track_path = is_math ? "/tracks/math/" : "/tracks/programming-languages/";
   }
   if (arg == "--host" && ai + 1 < args.len()) {
     host = args.get(ai + 1, host);
@@ -47,6 +55,9 @@ for (ai in range(0, args.len())) {
   }
   if (arg == "--seed" && ai + 1 < args.len()) {
     seed_str = args.get(ai + 1, seed_str);
+  }
+  if (arg == "--track" && ai + 1 < args.len()) {
+    track_path = args.get(ai + 1, track_path);
   }
 }
 
@@ -353,6 +364,8 @@ write_file(plan_path, json_stringify({
   book: book,
   host: host,
   seed: seed,
+  isMath: is_math,
+  trackPath: track_path,
   totalLessons: total_lessons,
   pages: sampled_pages
 }));
@@ -391,7 +404,7 @@ let tracks_errs = tracks.get("consoleErrors", []).len() + tracks.get("pageErrors
 
 let tracks_ok = tracks_status == 200 && tracks_has_link && tracks_clicked_path == book_prefix && tracks_clicked_status == 200 && tracks_errs == 0;
 check(tracks_ok,
-  f"Tracks Page (/tracks/programming-languages/) -> {book_prefix} Link",
+  f"Tracks Page ({track_path}) -> {book_prefix} Link",
   tracks_ok ? f"HTTP 200, link '{tracks.get('bookLinkHref', '')}' clicked -> '{tracks_clicked_path}' (HTTP {str(tracks_clicked_status)}), 0 console/network errors"
             : f"status={str(tracks_status)}, hasLink={str(tracks_has_link)}, clickedPath='{tracks_clicked_path}' ({str(tracks_clicked_status)}), errors={str(tracks_errs)}");
 
@@ -435,7 +448,7 @@ for (pi in range(0, page_results.len())) {
   let init_state = init_info.get("state", "");
   let init_rs = init_info.get("rsText", "");
 
-  let load_ok = p_status == 200 && p_title != "" && p_h1 != "" && p_vcount > 0 && init_state == "ready" && init_rs == "○ Not started";
+  let load_ok = p_status == 200 && p_title != "" && p_h1 != "" && p_vcount > 0 && (init_state == "ready" || init_state == "idle") && (init_rs == "○ Not started" || init_rs == "Not started");
   check(load_ok,
     f"{label_prefix} Initial State",
     load_ok ? f"HTTP 200, h1='{p_h1}', example='{p_ex}', state='{init_state}', rs='{init_rs}'"
@@ -448,9 +461,9 @@ for (pi in range(0, page_results.len())) {
   let final_rs = run_info.get("finalRsText", "");
   let run_err = run_info.get("errorText", "");
 
-  let saw_not_started = contains(transitions, "○ Not started");
-  let saw_running = contains(transitions, "▶ Running");
-  let saw_ended = contains(transitions, "■ Ended") && final_rs == "■ Ended" && final_state == "ended";
+  let saw_not_started = contains(transitions, "○ Not started") || contains(transitions, "Not started");
+  let saw_running = contains(transitions, "▶ Running") || contains(transitions, "Running");
+  let saw_ended = (contains(transitions, "■ Ended") || contains(transitions, "Ended")) && (final_rs == "■ Ended" || final_rs == "Ended") && (final_state == "ended" || final_state == "done");
   let run_cycle_ok = saw_not_started && saw_running && saw_ended && run_err == "";
 
   check(run_cycle_ok,
@@ -498,7 +511,7 @@ for (pi in range(0, page_results.len())) {
   let step_rs = step_info.get("rsText", "");
   let step_cur = step_info.get("hasCurrentLine", false);
   let step_hl = step_info.get("highlightVisible", false);
-  let step_ok = step_state == "stepping" && step_num == "1" && step_rs == "▶ Running" && step_cur && step_hl;
+  let step_ok = (step_state == "stepping" || step_state == "run") && step_num == "1" && (step_rs == "▶ Running" || step_rs == "Running") && step_cur && step_hl;
 
   check(step_ok,
     f"{label_prefix} Step State Change",
@@ -513,7 +526,7 @@ for (pi in range(0, page_results.len())) {
   let edit_match = edit_info.get("matchesRecordedSource", false);
   let edit_pressed = edit_info.get("ariaPressed", "");
   let edit_len = edit_info.get("valueLength", 0);
-  let edit_ok = edit_state == "edit" && edit_rs == "○ Not started" && edit_vis && edit_match && edit_pressed == "true";
+  let edit_ok = (edit_state == "edit" || edit_state == "idle") && (edit_rs == "○ Not started" || edit_rs == "Not started") && edit_vis && edit_match && edit_pressed == "true";
 
   check(edit_ok,
     f"{label_prefix} Edit State Change",
