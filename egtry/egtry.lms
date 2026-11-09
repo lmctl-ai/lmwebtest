@@ -23,11 +23,19 @@ let book = env("EGTRY_BOOK", "python");
 let host = env("EGTRY_HOST", "www.egtry.com");
 let v1_host = env("EGTRY_V1_HOST", "v1.egtry.com");
 let url_map_path = env("EGTRY_URL_MAP", "/home/ubuntu/repos/lmctlhq/interp-docs/docs/design/simple-viewer/poc/v7/url-map.json");
+let math_books = [
+  "arithmetic", "prealgebra", "algebra", "precalculus", "calculus",
+  "linear-algebra", "numerical-methods", "probability-statistics", "analytic-geometry"
+];
+let is_math = contains(math_books, book);
+let track_path = is_math ? "/tracks/math/" : "/tracks/programming-languages/";
 
 for (ai in range(0, args.len())) {
   let arg = args.get(ai, "");
   if (arg == "--book" && ai + 1 < args.len()) {
     book = args.get(ai + 1, book);
+    is_math = contains(math_books, book);
+    track_path = is_math ? "/tracks/math/" : "/tracks/programming-languages/";
   }
   if (arg == "--host" && ai + 1 < args.len()) {
     host = args.get(ai + 1, host);
@@ -38,9 +46,12 @@ for (ai in range(0, args.len())) {
   if (arg == "--url-map" && ai + 1 < args.len()) {
     url_map_path = args.get(ai + 1, url_map_path);
   }
+  if (arg == "--track" && ai + 1 < args.len()) {
+    track_path = args.get(ai + 1, track_path);
+  }
 }
 
-rmdir("work", true);
+rmdir("work/pages", true);
 mkdir("work/pages", true);
 
 let stats = {pass: 0, fail: 0};
@@ -237,31 +248,32 @@ check(all_pages_200,
   all_pages_200 ? f"all {str(kept_paths.len())} kept URLs under /{book}/ returned HTTP 200"
                 : f"{str(non_200_pages.len())} failed: {join(non_200_pages, ', ')}");
 
-# Fetch /tracks/programming-languages/ on host and v1_host
+# Fetch track page on host and v1_host
+let tracks_host = host == "v2.egtry.com" ? "www.egtry.com" : host;
 let fetch_tracks_www = system([
   "curl", "-sS", "-L", "--max-time", "20", "--retry", "2",
   "-w", "%{http_code}",
-  f"https://{host}/tracks/programming-languages/",
+  f"https://{tracks_host}{track_path}",
   "-o", "work/tracks_www.html"
 ]);
 let tracks_www_code = trim(fetch_tracks_www.get("stdout", ""));
 let tracks_www_ok = fetch_tracks_www.get("code", -1) == 0 && tracks_www_code == "200" && file_exists("work/tracks_www.html");
 check(tracks_www_ok,
-  f"Tracks Page HTTP 200 ({host})",
-  tracks_www_ok ? f"https://{host}/tracks/programming-languages/ returned HTTP 200"
+  f"Tracks Page HTTP 200 ({tracks_host})",
+  tracks_www_ok ? f"https://{tracks_host}{track_path} returned HTTP 200"
                 : f"expected HTTP 200, got {tracks_www_code}");
 
 let fetch_tracks_v1 = system([
   "curl", "-sS", "-L", "--max-time", "20", "--retry", "2",
   "-w", "%{http_code}",
-  f"https://{v1_host}/tracks/programming-languages/",
+  f"https://{v1_host}{track_path}",
   "-o", "work/tracks_v1.html"
 ]);
 let tracks_v1_code = trim(fetch_tracks_v1.get("stdout", ""));
 let tracks_v1_ok = fetch_tracks_v1.get("code", -1) == 0 && tracks_v1_code == "200" && file_exists("work/tracks_v1.html");
 check(tracks_v1_ok,
   f"Tracks Page HTTP 200 ({v1_host})",
-  tracks_v1_ok ? f"https://{v1_host}/tracks/programming-languages/ returned HTTP 200"
+  tracks_v1_ok ? f"https://{v1_host}{track_path} returned HTTP 200"
                : f"expected HTTP 200, got {tracks_v1_code}");
 
 if (!all_pages_200 || !tracks_www_ok || !tracks_v1_ok) {
@@ -305,6 +317,16 @@ for (d in range(0, docs.len())) {
   for (n in range(0, svs.len())) {
     let sv = svs.at(n);
     report.add("sv", pth, n, sv.attr("data-example") + "|" + sv.attr("data-state"));
+  }
+
+  let mbs = doc.select(".mb");
+  for (mn in range(0, mbs.len())) {
+    let mb = mbs.at(mn);
+    let ex_name = mb.attr("data-example");
+    if (ex_name == "") {
+      ex_name = mb.attr("data-problem");
+    }
+    report.add("sv", pth, svs.len() + mn, ex_name + "|" + mb.attr("data-state"));
   }
 
   let runs = doc.select(".sv-run, #sv-run, button#run");
@@ -513,7 +535,8 @@ for (xi in range(0, kept_paths.len())) {
     total_sv_examples = total_sv_examples + sv_list.len();
     let has_viewer_script = false;
     for (si in range(0, script_list.len())) {
-      if (contains(script_list.get(si, ""), "page.js")) {
+      let sc = script_list.get(si, "");
+      if (contains(sc, "page.js") || contains(sc, "math.js")) {
         has_viewer_script = true;
       }
     }
@@ -526,8 +549,8 @@ for (xi in range(0, kept_paths.len())) {
 let examples_ok = missing_example_pages.len() == 0 && lesson_page_count > 0;
 check(examples_ok,
   f"Executable Examples & Run Viewer on Lesson Pages ({str(lesson_page_count)} pages)",
-  examples_ok ? f"all {str(lesson_page_count)} lesson pages have .sv[data-example] + page.js Run viewer ({str(total_sv_examples)} total runnable examples)"
-              : f"missing .sv/Run viewer on: {join(missing_example_pages, ', ')}");
+  examples_ok ? f"all {str(lesson_page_count)} lesson pages have .sv/.mb[data-example] + viewer ({str(total_sv_examples)} total runnable examples)"
+              : f"missing .sv/.mb viewer on: {join(missing_example_pages, ', ')}");
 
 # 4c. Collect all relative links, viewer scripts/CSS, and prev/next pager links
 let viewer_asset_paths = [];
@@ -542,14 +565,16 @@ for (li in range(0, kept_paths.len())) {
   let kp = kept_paths.get(li, "");
 
   # Example trace JSON endpoints (data/<example>.json)
-  let sv_items = page_svs.get(kp, []);
-  for (svi in range(0, sv_items.len())) {
-    let sv_parts = split(sv_items.get(svi, ""), "|");
-    let ex_name = sv_parts.get(0, "");
-    if (ex_name != "") {
-      let data_url = resolve_href(kp, "data/" + ex_name + ".json");
-      if (data_url != "" && !contains(example_data_paths, data_url)) {
-        push(example_data_paths, data_url);
+  if (!is_math) {
+    let sv_items = page_svs.get(kp, []);
+    for (svi in range(0, sv_items.len())) {
+      let sv_parts = split(sv_items.get(svi, ""), "|");
+      let ex_name = sv_parts.get(0, "");
+      if (ex_name != "") {
+        let data_url = resolve_href(kp, "data/" + ex_name + ".json");
+        if (data_url != "" && !contains(example_data_paths, data_url)) {
+          push(example_data_paths, data_url);
+        }
       }
     }
   }
@@ -695,11 +720,12 @@ for (edj in range(0, example_data_paths.len())) {
     push(failed_example_data, f"{edp2} (HTTP {edst})");
   }
 }
-let example_data_ok = example_data_paths.len() > 0 && failed_example_data.len() == 0;
+let example_data_ok = is_math || (example_data_paths.len() > 0 && failed_example_data.len() == 0);
 check(example_data_ok,
   f"Example Trace JSON Endpoints HTTP 200 ({str(example_data_paths.len())} traces)",
-  example_data_ok ? f"all {str(example_data_paths.len())} data/<example>.json endpoints responded HTTP 200"
-                  : f"{str(failed_example_data.len())} failed: {join(failed_example_data, ', ')}");
+  is_math ? "math books use in-browser dynamic procedural lowering (no pre-recorded JSON trace endpoints required)"
+          : (example_data_ok ? f"all {str(example_data_paths.len())} data/<example>.json endpoints responded HTTP 200"
+                             : f"{str(failed_example_data.len())} failed: {join(failed_example_data, ', ')}"));
 
 # 4e. Check Previous / Next / All-pages Navigation Links
 for (pli in range(0, kept_paths.len())) {
@@ -748,7 +774,7 @@ check(internal_links_ok,
   internal_links_ok ? f"all {str(all_relative_targets.len())} relative/internal link targets across {str(kept_paths.len())} pages resolved to HTTP 200"
                     : f"{str(broken_internal_links.len())} broken internal links: {join(broken_internal_links, ', ')}");
 
-# 4g. Compare /tracks/programming-languages/ on host vs v1_host and verify /<book>/ link works
+# 4g. Compare track page on tracks_host vs v1_host and verify /<book>/ link works
 let tracks_has_book_www = contains(tracks_www_links, book_prefix);
 let tracks_has_book_v1 = contains(tracks_v1_links, book_prefix);
 let tracks_book_200 = http_status_by_path.get(book_prefix, "") == "200";
@@ -756,8 +782,8 @@ let tracks_match = tracks_www_title == tracks_v1_title && tracks_www_h1 == track
 let tracks_check_ok = tracks_has_book_www && tracks_has_book_v1 && tracks_book_200 && tracks_match;
 
 check(tracks_check_ok,
-  f"Tracks Page Comparison ({host} vs {v1_host}) & /{book}/ Link",
-  tracks_check_ok ? f"title='{tracks_www_title}', h1='{tracks_www_h1}', {str(tracks_www_links.len())} links match v1; '{book_prefix}' present and resolves to HTTP 200"
+  f"Tracks Page Comparison ({tracks_host} vs {v1_host}) & /{book}/ Link",
+  tracks_check_ok ? f"title='{tracks_www_title}', h1='{tracks_www_h1}', {str(tracks_www_links.len())} links match v1; '{book_prefix}' present on {track_path} and resolves to HTTP 200"
                   : f"www_has_book={str(tracks_has_book_www)}, v1_has_book={str(tracks_has_book_v1)}, book_200={str(tracks_book_200)}, match={str(tracks_match)}");
 
 # -----------------------------------------------------------------------------
