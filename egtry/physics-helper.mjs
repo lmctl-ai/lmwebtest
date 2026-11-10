@@ -10,7 +10,7 @@ import { workedReplay, splitAnswer, quantitySolver } from './physics-checks.mjs'
 
 // Public DOM contract; --selectors can adapt a framework without weakening checks.
 const defaults = {
-  model: '[data-physics-model], .physics-model',
+  model: '[data-physics-model]:has(canvas), .physics-model:has(canvas)',
   solver: '[data-physics-solver], [data-physics-quantity]', parameter: '[data-quantity-parameter], .ph-controls input[type="number"]', result: '[data-quantity-result], .ph-measure',
   staticParameter: '.ph-controls input[type="number"], [data-quantity-parameter]', staticResult: '.ph-measure, [data-quantity-result]',
   canvas: 'canvas', play: '[data-action="play"], .ph-play',
