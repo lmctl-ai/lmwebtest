@@ -4,12 +4,14 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { runPhysicsQA } from './physics-helper.mjs';
+import {chromium} from 'playwright';
+import { runPhysicsQA, modelScopes } from './physics-helper.mjs';
 
 // This is a suite regression fixture, not evidence about a real physics engine.
 const replay = `<div class="mb-player"><button type="button" class="replay-step">Step</button><ol class="bb-board"></ol></div>`;
 const lesson = broken => `<!doctype html><html><head><meta charset="utf-8"><title>Fixture</title><link rel="icon" href="data:,"></head><body><h1>Fixture</h1>
 <section data-physics-model><canvas width="300" height="120"></canvas><button data-action="play">Play</button><button data-action="step">Step</button><div data-model-worked>${replay}</div></section>
+${broken==='missing-second-canvas'?'<section data-physics-model><p>This second model lost its canvas.</p></section>':''}
 <section data-physics-exercise data-state="open"><p data-problem></p><input data-answer-input type="text"><button data-action="check">Check</button><button data-action="next">Next</button><div data-worked-solution hidden>Use F = ma. Multiply mass 2 kg by acceleration 3 m/s². Answer: <span data-solution-answer="6 N">6 N</span>${replay}</div><p role="status"></p></section>
 <script>
 const broken=${JSON.stringify(broken)};
@@ -61,7 +63,7 @@ test('physics QA proves behavior and rejects broken pages', { timeout: 420000 },
     assert.equal(progress.visited,4);assert.equal(progress.complete,true);assert.deepEqual(progress.active,[]);
     assert.equal(good.checks.filter(c => c.name.startsWith('Right answer accepted')).length, 4);
     assert.match(await fs.readFile(opt.report, 'utf8'), /Overall Verdict.*PASS/);
-    for (const [variant, expected] of [['broken', 'Animation pixels'], ['accept-wrong', 'Exercise 1'], ['next', 'Exercise 1'], ['console', 'Console/network'], ['hidden-steps', 'Model 1'], ['transparent-steps', 'Model 1'], ['visible-answer-mismatch', 'Exercise 1'], ['prose-only', 'Exercise 1'], ['accept-valid-unit-wrong', 'Exercise 1'], ['accept-wrong-dimension', 'Exercise 1'], ['missing', 'Index lists every old slug']]) {
+    for (const [variant, expected] of [['broken', 'Animation pixels'], ['missing-second-canvas', 'Model 2'], ['accept-wrong', 'Exercise 1'], ['next', 'Exercise 1'], ['console', 'Console/network'], ['hidden-steps', 'Model 1'], ['transparent-steps', 'Model 1'], ['visible-answer-mismatch', 'Exercise 1'], ['prose-only', 'Exercise 1'], ['accept-valid-unit-wrong', 'Exercise 1'], ['accept-wrong-dimension', 'Exercise 1'], ['missing', 'Index lists every old slug']]) {
       mode = variant;
       const bad = await runPhysicsQA(opt);
       assert.equal(bad.status, 'FAIL', variant);
@@ -74,4 +76,14 @@ test('physics QA proves behavior and rejects broken pages', { timeout: 420000 },
     await Promise.all([new Promise(r => legacy.close(r)), new Promise(r => target.close(r))]);
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+
+test('a canvasless quantity adapter is distinct from a broken second canvas model',async()=>{
+ const browser=await chromium.launch(process.env.CHROME?{executablePath:process.env.CHROME}:{});
+ try{
+  const page=await browser.newPage();
+  await page.setContent('<section id="time" data-physics-model><canvas></canvas></section><section id="quantity-only" data-physics-model data-physics-solver></section><section id="quantity-canvas" data-physics-model data-physics-quantity><canvas></canvas></section><section id="broken" data-physics-model></section>');
+  const models=await modelScopes(page);
+  assert.deepEqual(await Promise.all(models.map(model=>model.getAttribute('id'))),['time','quantity-canvas','broken']);
+ }finally{await browser.close();}
 });

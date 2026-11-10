@@ -10,7 +10,7 @@ import { workedReplay, splitAnswer, quantitySolver } from './physics-checks.mjs'
 
 // Public DOM contract; --selectors can adapt a framework without weakening checks.
 const defaults = {
-  model: '[data-physics-model]:has(canvas), .physics-model:has(canvas)',
+  model: '[data-physics-model], .physics-model',
   solver: '[data-physics-solver], [data-physics-quantity]', parameter: '[data-quantity-parameter], .ph-controls input[type="number"]', result: '[data-quantity-result], .ph-measure',
   staticParameter: '.ph-controls input[type="number"], [data-quantity-parameter]', staticResult: '.ph-measure, [data-quantity-result]',
   canvas: 'canvas', play: '[data-action="play"], .ph-play',
@@ -25,6 +25,18 @@ const defaults = {
   replay: '.mb-player', replayStep: '.bb-step', replayLine: '.bb-line', replayNote: '.bb-note',
   answer: '[data-solution-answer]', feedback: '[role="status"], .ph-feedback',
 };
+// A declared quantity solver may share the model class without a canvas.
+// Keep every other declared model, including broken ones missing their canvas.
+export async function modelScopes(page, selectors = defaults) {
+  const candidates = page.locator(selectors.model), models = [];
+  for (let i = 0; i < await candidates.count(); i++) {
+    const candidate = candidates.nth(i);
+    const pureQuantity = await candidate.evaluate((el, solver) => el.matches(solver), selectors.solver)
+      && await candidate.locator(selectors.canvas).count() === 0;
+    if (!pureQuantity) models.push(candidate);
+  }
+  return models;
+}
 function options(args) {
   const out = { book: 'mechanics', host: 'www.egtry.com', 'v1-host': 'v1.egtry.com', pages: 'all', seed: '731', workers:'1' };
   const keys = new Set([...Object.keys(out), 'report', 'selectors', 'out-dir', 'scenarios', 'inventory']);
@@ -154,8 +166,8 @@ export async function runPhysicsQA(opt) {
           require(response?.status() === 200, `HTTP ${response?.status()}`);
           check(Boolean(await page.title()) && Boolean(await page.locator('h1').count()), `Metadata ${label}`, 'title and h1');
           check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `Layout ${label}`, 'no horizontal overflow');
-          const models = page.locator(selectors.model);
-          const modelCount = await models.count();
+          const models = await modelScopes(page, selectors);
+          const modelCount = models.length;
           const solvers = page.locator(selectors.solver), solverCount = await solvers.count();
           check(modelCount + solverCount > 0, `Model present ${label}`, `${modelCount} model applets, ${solverCount} quantity solvers`);
           for (let q = 0; q < solverCount; q++) await attempt(`Quantity solver ${q + 1} ${label}`, async () => {
@@ -163,7 +175,7 @@ export async function runPhysicsQA(opt) {
             check(true, `Quantity parameters/worked steps ${q + 1} ${label}`, JSON.stringify(evidence));
           });
           for (let m = 0; m < modelCount; m++) await attempt(`Model ${m + 1} ${label}`, async () => {
-            const model = models.nth(m), canvas = model.locator(selectors.canvas).first();
+            const model = models[m], canvas = model.locator(selectors.canvas).first();
             await canvas.waitFor({ state: 'visible' });
             const pixels = async () => canvas.evaluate(el => {
               const ctx = el.getContext('2d');
