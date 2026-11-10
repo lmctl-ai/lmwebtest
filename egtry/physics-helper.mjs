@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { workedReplay, splitAnswer, quantitySolver } from './physics-checks.mjs';
 
 // Public DOM contract; --selectors can adapt a framework without weakening checks.
 const defaults = {
   model: '[data-physics-model], .physics-model',
+  solver: '[data-physics-solver], [data-physics-quantity]', parameter: '[data-quantity-parameter], .ph-controls input[type="number"]', result: '[data-quantity-result], .ph-measure',
+  staticParameter: '.ph-controls input[type="number"], [data-quantity-parameter]', staticResult: '.ph-measure, [data-quantity-result]',
   canvas: 'canvas', play: '[data-action="play"], .ph-play',
   pause: '[data-action="pause"], [data-action="play"], .ph-play',
   step: '[data-action="step"], .ph-step',
@@ -15,13 +19,15 @@ const defaults = {
   check: '[data-action="check"], .ph-check', next: '[data-action="next"], .ph-next',
   problem: '[data-problem], .ph-problem',
   solution: '[data-worked-solution], .ph-solution',
+  modelWorked: '.ph-worked, [data-model-worked]',
+  replay: '.mb-player', replayStep: '.bb-step', replayLine: '.bb-line', replayNote: '.bb-note',
   answer: '[data-solution-answer]', feedback: '[role="status"], .ph-feedback',
 };
 function options(args) {
   const out = { book: 'mechanics', host: 'www.egtry.com', 'v1-host': 'v1.egtry.com', pages: 'all', seed: '731' };
-  const keys = new Set([...Object.keys(out), 'report', 'selectors', 'out-dir']);
+  const keys = new Set([...Object.keys(out), 'report', 'selectors', 'out-dir', 'scenarios']);
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--help') { console.log('physics.lms --book SLUG --host HOST [--v1-host HOST] [--pages N|all] [--seed N] [--selectors FILE] [--report FILE] [--out-dir DIR]'); process.exit(0); }
+    if (args[i] === '--help') { console.log('physics.lms --book SLUG --host HOST [--v1-host HOST] [--pages N|all] [--seed N] [--selectors FILE] [--report FILE] [--out-dir DIR] [--scenarios FILE]'); process.exit(0); }
     const key = args[i].replace(/^--/, '');
     if (!args[i].startsWith('--') || !keys.has(key) || !args[i + 1] || args[i + 1].startsWith('--')) throw Error(`Invalid option: ${args[i]}`);
     out[key] = args[++i];
@@ -34,8 +40,17 @@ function options(args) {
 const origin = value => new URL(value.includes('://') ? value : `https://${value}`).origin;
 export async function runPhysicsQA(opt) {
   const selectors = { ...defaults, ...(opt.selectors ? JSON.parse(await fs.readFile(opt.selectors, 'utf8')) : {}) };
+  const scenarios = opt.scenarios ? JSON.parse(await fs.readFile(opt.scenarios, 'utf8')) : {};
+  const casesFor = async root => {
+    const config = await root.evaluate(el => JSON.parse(el.closest('.ph')?.querySelector('.ph-data')?.textContent || '{}'));
+    return scenarios[config.family] || [];
+  };
   const base = origin(opt.host), legacy = origin(opt['v1-host']), prefix = `/${opt.book}/`;
-  const report = { suite: 'egtry-physics', timestamp: new Date().toISOString(), book: opt.book, host: base, legacy, seed: opt.seed, checks: [], legacySlugs: [], targetSlugs: [], testedSlugs: [] };
+  const hashFile = async file => createHash('sha256').update(await fs.readFile(file)).digest('hex');
+  const helperSha256 = await hashFile(fileURLToPath(import.meta.url));
+  const checksSha256 = await hashFile(new URL('./physics-checks.mjs', import.meta.url));
+  const scenarioSource = opt.scenarios ? {file: opt.scenarios, sha256: await hashFile(opt.scenarios), families: Object.keys(scenarios)} : null;
+  const report = { helperSha256, checksSha256, scenarioSource, suite: 'egtry-physics', timestamp: new Date().toISOString(), book: opt.book, host: base, legacy, seed: opt.seed, checks: [], legacySlugs: [], targetSlugs: [], testedSlugs: [] };
   function check(ok, name, detail = '') {
     report.checks.push({ name, status: ok ? 'PASS' : 'FAIL', detail: String(detail) });
     console.log(`[${ok ? 'PASS' : 'FAIL'}] ${name}: ${detail}`);
@@ -44,6 +59,7 @@ export async function runPhysicsQA(opt) {
     try { await fn(); } catch (e) { check(false, name, e.message); }
   }
   function require(ok, message) { if (!ok) throw Error(message); }
+  const replay = scope => workedReplay(scope, {player: selectors.replay, steps: selectors.replayStep, line: selectors.replayLine, note: selectors.replayNote});
   let browser;
   try {
     browser = await chromium.launch({ headless: true, ...(process.env.CHROME ? { executablePath: process.env.CHROME } : {}) });
@@ -117,7 +133,12 @@ export async function runPhysicsQA(opt) {
           check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `Layout ${label}`, 'no horizontal overflow');
           const models = page.locator(selectors.model);
           const modelCount = await models.count();
-          check(modelCount > 0, `Model present ${label}`, `${modelCount} models`);
+          const solvers = page.locator(selectors.solver), solverCount = await solvers.count();
+          check(modelCount + solverCount > 0, `Model present ${label}`, `${modelCount} time models, ${solverCount} quantity solvers`);
+          for (let q = 0; q < solverCount; q++) await attempt(`Quantity solver ${q + 1} ${label}`, async () => {
+            const evidence = await quantitySolver(solvers.nth(q), replay, {parameter: selectors.parameter, result: selectors.result, scenarios: await casesFor(solvers.nth(q))});
+            check(true, `Quantity parameters/worked steps ${q + 1} ${label}`, JSON.stringify(evidence));
+          });
           for (let m = 0; m < modelCount; m++) await attempt(`Model ${m + 1} ${label}`, async () => {
             const model = models.nth(m), canvas = model.locator(selectors.canvas).first();
             await canvas.waitFor({ state: 'visible' });
@@ -135,6 +156,12 @@ export async function runPhysicsQA(opt) {
             const before = await pixels();
             require(before.varied > 20 && before.width > 20 && before.height > 20, `Blank canvas: ${JSON.stringify(before)}`);
             check(true, `Canvas nonblank ${m + 1} ${label}`, JSON.stringify(before));
+            const mode = await model.getAttribute('data-model-mode');
+            if (mode === 'static' || ['quantity', 'static'].includes(await model.getAttribute('data-model-kind'))) {
+              const evidence = await quantitySolver(model, replay, {parameter: selectors.staticParameter, result: selectors.staticResult, observe: async () => (await pixels()).hash, scenarios: await casesFor(model)});
+              check(true, `Static parameter/result/replay ${m + 1} ${label}`, JSON.stringify(evidence));
+              return;
+            }
             const play = model.locator(selectors.play).first();
             await play.click();
             const pause = model.locator(selectors.pause).first();
@@ -150,6 +177,8 @@ export async function runPhysicsQA(opt) {
             check(stepped.hash !== paused2.hash, `Step advances ${m + 1} ${label}`, `${paused2.hash} -> ${stepped.hash}`);
             await page.waitForTimeout(200);
             check((await pixels()).hash === stepped.hash, `Step stays paused ${m + 1} ${label}`, 'one step only');
+            const lines = await replay(model.locator(selectors.modelWorked).first());
+            check(true, `Model worked replay ${m + 1} ${label}`, JSON.stringify(lines));
           });
           const exercises = page.locator(selectors.exercise), exerciseCount = await exercises.count();
           check(exerciseCount > 0, `Exercise present ${label}`, `${exerciseCount} exercises`);
@@ -160,13 +189,29 @@ export async function runPhysicsQA(opt) {
             await input.fill('9.87654321e99'); await ex.locator(selectors.check).first().click();
             const solution = ex.locator(selectors.solution).first();
             await solution.waitFor({ state: 'visible' });
-            const worked = (await solution.innerText()).trim();
-            require(worked.length > 20, 'Wrong answer did not show worked steps');
             require(['wrong', 'shown'].includes(await ex.getAttribute('data-state')), 'Wrong answer not marked wrong/shown');
-            check(true, `Wrong answer worked solution ${e + 1} ${label}`, worked.slice(0, 180));
+            const worked = await replay(solution);
+            check(true, `Wrong answer worked solution ${e + 1} ${label}`, JSON.stringify(worked));
             const answerNode = solution.locator(selectors.answer).first();
+            require(await answerNode.isVisible(), 'Worked answer is hidden');
             const answer = await answerNode.getAttribute('data-solution-answer') || (await answerNode.innerText()).trim();
-            require(answer, 'Worked solution has no reusable answer');
+            const {value, unit} = splitAnswer(answer);
+            const visibleAnswer = splitAnswer((await answerNode.innerText()).replace(/^Answer:\s*/i, ''));
+            require(visibleAnswer.value === value && visibleAnswer.unit === unit, 'Worked answer attribute disagrees with visible answer');
+            // A dimensionally valid wrong value must fail, independently of syntax rejection.
+            await page.reload({waitUntil: 'networkidle'});
+            require(await problem() === initial, 'Seed did not reproduce the same problem');
+            const wrong = `${value + Math.max(1, Math.abs(value)) * 10} ${unit}`;
+            await input.fill(wrong); await ex.locator(selectors.check).first().click();
+            require(['wrong', 'shown'].includes(await ex.getAttribute('data-state')), 'Numerically wrong answer with valid units was accepted');
+            await ex.locator(selectors.solution).first().waitFor({state: 'visible'});
+            check(true, `Valid-unit wrong answer rejected ${e + 1} ${label}`, wrong);
+            // Same numeric answer with an incompatible dimension must also fail.
+            await page.reload({waitUntil: 'networkidle'});
+            const wrongUnit = ['s','min','ms','us','ns','h','day','year'].includes(unit) ? 'm' : 's';
+            await input.fill(`${value} ${wrongUnit}`); await ex.locator(selectors.check).first().click();
+            require(['wrong', 'shown'].includes(await ex.getAttribute('data-state')), 'Answer with incompatible units was accepted');
+            check(true, `Wrong dimension rejected ${e + 1} ${label}`, `${value} ${wrongUnit}`);
             // Reload the same seeded problem so a revealed solution cannot count as a right answer.
             await page.reload({ waitUntil: 'networkidle' });
             require(await problem() === initial, 'Seed did not reproduce the same problem');

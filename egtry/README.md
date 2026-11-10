@@ -141,9 +141,8 @@ the visible solution supplies the answer, then reloading `?seed=731` must
 reproduce the problem and accept that answer; Next must change the problem.
 Missing widgets and unsupported contracts **fail**. A legacy static page is an
 expected negative baseline, never accepted as a completed R42 page. Static
-physical models need an explicit scientifically appropriate parameter-change
-adapter/check before acceptance; this suite currently requires time playback
-and does not exempt them or manufacture animation.
+physical models use the explicit parameter-change adapters described below;
+unsupported models fail rather than receiving fake animation.
 
 Public DOM contract (coordinate with the physics framework owner):
 
@@ -173,3 +172,65 @@ Any failed check exits nonzero; invalid CLI arguments exit 2. `--pages N` keeps
 first/last plus seeded interior pages and marks the report **sample-only**;
 it is insufficient for whole-book signoff. Reports omit scientific judgement:
 agy QA must add tested revisions, severity and physical correctness findings.
+
+### Physics second-review checks and static applets
+
+The suite now completes the **actual worked replay**, using the shared
+`.mb-player` Step control: equations AND explanatory notes must be perceptible,
+steps must advance, and the completed board must include at least the law,
+substitution, calculation and check. A prose/answer-only box, hidden steps,
+transparent steps or a hidden answer fails. The visible dimensioned answer must
+agree with its answer attribute. After revealing a solution, the suite also
+reloads and rejects a numerically wrong value WITH VALID UNITS, then a value
+with incompatible dimensions, before testing the correct answer and Next.
+The JSON/text/Markdown evidence includes the completed equations and notes so
+reviewers can audit the actual teaching procedure.
+
+Static applets have their own behavior checks; a clock is not required:
+
+| Applet | Supported contract | Required interaction |
+|---|---|---|
+| Quantity calculator | `[data-physics-solver]` or `[data-physics-quantity]` | Visible numeric parameter changes the dimensioned result AND worked replay; restoring givens restores result |
+| Quantity response plot | `[data-physics-model][data-model-kind="quantity"]` | Nonblank canvas, parameter/result/replay checks, and canvas responds to the changed quantity |
+| Static physical explorer | `[data-physics-model][data-model-mode="static"]` | Nonblank canvas, changed parameter updates result, geometry/plot pixels AND worked replay |
+| Time model | Other `[data-physics-model]` roots | Nonblank/animating canvas, Play/Pause/Step and worked replay |
+
+Calculator controls use `[data-quantity-parameter]` or `.ph-controls input[type=number]`,
+and results use `[data-quantity-result]` or `.ph-measure` (optional label followed
+by `:` or `=`). An explicit `[data-action=calculate]` is clicked when present;
+automatic change handlers are supported too. The finite real-amplitude adapter
+can change `a` AND `b` together through Calculate to preserve normalization; it
+tries normalized basis and 3–4–5 pairs rather than perturbing a constrained state
+one coordinate at a time. This is an interaction probe, not a new source model.
+Other constrained state spaces need an explicit scientifically valid adapter.
+
+Additional selector keys are `solver`, `parameter`, `result`, `staticParameter`,
+`staticResult`, `modelWorked`, `replay`, `replayStep`, `replayLine`, `replayNote`.
+`physics-checks.mjs` contains the shared replay/quantity probes.
+Run both adversarial suites under the browser gate:
+
+```bash
+flock /tmp/browser-gate.lock node --test --test-concurrency=1 \
+  physics-helper.test.mjs physics-quantity.test.mjs
+```
+
+The fixtures additionally reject frozen calculator outputs, output changes with
+stale steps, hidden results, answer attributes inconsistent with visible answers,
+and accepting valid-unit wrong answers or incompatible dimensions. These fixtures
+establish suite sensitivity; they do not certify a book's scientific correctness.
+
+For bounded/discrete domains, `--scenarios FILE` supplies a JSON object mapping
+family IDs to arrays of valid **givens only**, with parameter names as keys.
+The UI must still change its visible result, canvas (where present) and worked
+steps and restore the original result. Scenarios never supply expected answers
+or suppress checks. From an interp-docs worktree, generate reviewed inputs with:
+
+```bash
+node scripts/physics/qa-scenarios.mjs --book BOOK --out /tmp/BOOK-qa-inputs.json
+# Then, from lmwebtest/egtry:
+./run.sh --physics --book BOOK --host HOST --scenarios /tmp/BOOK-qa-inputs.json
+```
+
+Reports record the helper/check module SHA-256 hashes at execution and the
+scenario file hash, which identifies code/input evidence even while worktrees
+are awaiting the shared browser lock.
