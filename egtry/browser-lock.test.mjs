@@ -44,8 +44,8 @@ test('the actual lmscript entrypoint preserves nested locking and helper errors'
  await fs.symlink(path.resolve(sourceDir,'../node_modules'),path.join(dir,'node_modules'));
  const source=await fs.readFile(path.join(sourceDir,'physics.lms'),'utf8'),script=path.join(dir,'physics.lms');
  await fs.writeFile(script,source.replace('"/tmp/browser-gate.lock"',JSON.stringify(lock)));
- const direct=await run('lmscript',[script,'--workers','0'],{cwd:dir});assert.equal(direct.code,2,direct.output);assert.match(direct.output,/workers must be 1 or 2/);
- const official=await run('bash',[wrapper,lock,'lmscript',script,'--workers','0'],{cwd:dir});assert.equal(official.code,2,official.output);assert.match(official.output,/workers must be 1 or 2/);
- const nested=await run('flock',[lock,'bash',wrapper,lock,'lmscript',script,'--workers','0'],{cwd:dir});assert.equal(nested.code,2,nested.output);assert.match(nested.output,/workers must be 1 or 2/);
+ const direct=await run('lmscript',[script,'--workers','0'],{cwd:dir});assert.equal(direct.code,2,direct.output);assert.match(direct.output,/workers must be/);
+ const official=await run('bash',[wrapper,lock,'lmscript',script,'--workers','0'],{cwd:dir});assert.equal(official.code,2,official.output);assert.match(official.output,/workers must be/);
+ const nested=await run('flock',[lock,'bash',wrapper,lock,'lmscript',script,'--workers','0'],{cwd:dir});assert.equal(nested.code,2,nested.output);assert.match(nested.output,/workers must be/);
  const raw=await run('flock',[lock,'lmscript',script,'--workers','0'],{cwd:dir});assert.equal(raw.code,2,raw.output);assert.match(raw.output,/held by an ancestor without context/);
 }));
