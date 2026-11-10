@@ -157,7 +157,7 @@ export async function runPhysicsQA(opt) {
             require(before.varied > 20 && before.width > 20 && before.height > 20, `Blank canvas: ${JSON.stringify(before)}`);
             check(true, `Canvas nonblank ${m + 1} ${label}`, JSON.stringify(before));
             const mode = await model.getAttribute('data-model-mode');
-            if (mode === 'static' || ['quantity', 'static'].includes(await model.getAttribute('data-model-kind'))) {
+            if (mode === 'static' || ['quantity', 'quantity-solver', 'static'].includes(await model.getAttribute('data-model-kind'))) {
               const evidence = await quantitySolver(model, replay, {parameter: selectors.staticParameter, result: selectors.staticResult, observe: async () => (await pixels()).hash, scenarios: await casesFor(model)});
               check(true, `Static parameter/result/replay ${m + 1} ${label}`, JSON.stringify(evidence));
               return;
