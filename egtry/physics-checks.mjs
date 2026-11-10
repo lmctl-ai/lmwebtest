@@ -95,7 +95,9 @@ export async function quantitySolver(root, replay, {parameter = '[data-quantity-
     const input = inputs.nth(i), raw = await input.inputValue(), initial = Number(raw);
     if (!await input.isVisible() || !await input.isEnabled() || !Number.isFinite(initial)) continue;
     const min = Number(await input.getAttribute('min') ?? '-Infinity'), max = Number(await input.getAttribute('max') ?? 'Infinity');
-    const delta = Math.max(1, Math.abs(initial) * .1);
+    const step=Number(await input.getAttribute('step'));
+    let delta=Number.isFinite(step)&&step>0?step:initial!==0?Math.abs(initial)*.1:Number.isFinite(min)&&Number.isFinite(max)?(max-min)/10:1;
+    if(Number.isFinite(min)&&Number.isFinite(max)&&delta>max-min)delta=(max-min)/10;
     for (const next of [...new Set([initial+delta,initial-delta,initial+2*delta,initial-2*delta,initial+10*delta,initial-10*delta,initial+1,initial-1])].filter(n=>n>=min&&n<=max)) {
       await update(input,String(next));
       const after = (await output.innerText()).trim();
