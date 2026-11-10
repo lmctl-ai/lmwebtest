@@ -71,7 +71,7 @@ if [ "$PHYSICS_MODE" -eq 1 ]; then
     exit 2
   fi
   cd "$HERE"
-  exec lmscript physics.lms "${PASS_ARGS[@]}"
+  exec bash "$HERE/browser-lock.sh" /tmp/browser-gate.lock lmscript physics.lms "${PASS_ARGS[@]}"
 fi
 
 # -----------------------------------------------------------------------------

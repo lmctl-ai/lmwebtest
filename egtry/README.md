@@ -282,3 +282,22 @@ for whole-book acceptance.
 ```bash
 ./run.sh --physics --book mechanics --host HOST --workers 2 --report REPORT.md
 ```
+
+
+### Browser lock ownership
+
+`run.sh --physics` owns the browser gate; an extra outer flock is unnecessary.
+The Linux wrapper also supports an existing exclusive outer flock without
+acquiring a second description of the same lock. `browser-lock.sh` verifies
+actual exclusive ownership and propagates validated context across LMScript's
+process bridge. Separate callers still serialize, and stale context cannot
+bypass the gate or retain a lock in an unrelated parent.
+
+Use the official `run.sh` entrypoint when wrapping an existing lock. A raw
+`flock ... lmscript physics.lms` call loses inherited descriptors in the process
+bridge and now fails promptly with guidance instead of deadlocking. Direct
+unwrapped `lmscript physics.lms` still acquires the gate normally.
+
+`node --test browser-lock.test.mjs` tests standalone/nested execution, mutual
+exclusion, stale context, descriptor lifetime, exit propagation and the actual
+LMScript entrypoint, using temporary locks and no Chrome process.
