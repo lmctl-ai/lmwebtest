@@ -11,12 +11,14 @@ ROOT="$(cd "$HERE/.." && pwd)"
 # -----------------------------------------------------------------------------
 CHROME_MODE=0
 HOME_MODE=0
+PHYSICS_MODE=0
 PASS_ARGS=()
 for arg in "$@"; do
   if [ "$arg" = "--help" ] || [ "$arg" = "-h" ]; then
-    echo "Usage: ./run.sh [--home | --chrome] [--book <name>] [--host <host>] [--pages <N>] [--seed <S>] [--v1-host <host>] [--url-map <path>]"
+    echo "Usage: ./run.sh [--home | --chrome | --physics] [--book <name>] [--host <host>] [--pages <N>] [--seed <S>] [--v1-host <host>] [--url-map <path>]"
     echo ""
     echo "Options:"
+    echo "  --physics                  Physics HTTP + Playwright QA, all pages at 1280 and 390 (physics.lms)"
     echo "  --home                     Run headless Chrome (Playwright) R37 homepage QA suite (home.lms) under flock /tmp/browser-gate.lock"
     echo "  --chrome                   Run headless Chrome (Playwright) book QA suite (chrome.lms) under flock /tmp/browser-gate.lock"
     echo "  --book <name>              Book slug to test (default: python, e.g. bash, c, cpp, csharp, dart, go, java, javascript, kotlin, lua, perl, php, ruby, scala, sql, swift, typescript, rust, python)"
@@ -30,8 +32,11 @@ for arg in "$@"; do
     echo "  --min-fit-pct <P>          Minimum % of 40-example sample fitting without scroll in --home mode (default: 95)"
     echo "  --v1-host <host>           Legacy host for tracks comparison in default curl+lmhtml mode (default: v1.egtry.com)"
     echo "  --url-map <path>           Path to url-map.json in default curl+lmhtml mode"
+    echo "  Physics defaults: mechanics, all pages at 1280/390; also --report FILE, --selectors FILE, --out-dir DIR (see README)"
     echo "  --help, -h                 Show this help message and exit"
     exit 0
+  elif [ "$arg" = "--physics" ]; then
+    PHYSICS_MODE=1
   elif [ "$arg" = "--chrome" ]; then
     CHROME_MODE=1
   elif [ "$arg" = "--home" ]; then
@@ -57,6 +62,16 @@ fi
 if ! command -v curl >/dev/null 2>&1; then
   echo "Error: curl is not on PATH" >&2
   exit 1
+fi
+
+# Physics uses Playwright DOM extraction and needs no lmhtml binary/download.
+if [ "$PHYSICS_MODE" -eq 1 ]; then
+  if [ "$HOME_MODE" -eq 1 ] || [ "$CHROME_MODE" -eq 1 ]; then
+    echo "Error: --physics cannot be combined with --home or --chrome" >&2
+    exit 2
+  fi
+  cd "$HERE"
+  exec lmscript physics.lms "${PASS_ARGS[@]}"
 fi
 
 # -----------------------------------------------------------------------------

@@ -107,3 +107,69 @@ For every kept URL of `/<book>/` in `url-map.json` (plus the book index `/<book>
 6. **Previous / Next / All-Pages Navigation**: Verifies `nav.sv-crumbs` and `nav.sv-pager` (`rel="prev"`, `rel="next"`, and `All pages` index link) on every lesson page resolve to valid kept URLs returning `HTTP 200`.
 7. **Internal Relative Links**: Resolves all relative and root-relative links across the book and verifies zero broken internal links (`HTTP 200`).
 8. **Tracks Page Comparison**: Fetches `https://<host>/tracks/programming-languages/` and `https://<v1-host>/tracks/programming-languages/`, compares title/heading/links, and verifies the `/<book>/` link is present and returns `HTTP 200`.
+
+## Physics R42 (`--physics` / `physics.lms`)
+
+```bash
+./run.sh --physics --book mechanics --host www.egtry.com
+./run.sh --physics --book mechanics --host v2.egtry.com \
+  --report /path/to/interp-worktree/docs/spikes/v7-switch-mechanics-qa.md
+# Development sample only: HTTP still checks every legacy + target slug.
+./run.sh --physics --book mechanics --host www.egtry.com --pages 2 --seed 731
+# Suite regression tests (working and deliberately broken local fixtures):
+flock /tmp/browser-gate.lock node --test physics-helper.test.mjs
+```
+
+`physics.lms` calls the Playwright CLI helper under `flock /tmp/browser-gate.lock`.
+Requires Node, lmscript, Playwright and installed Chromium; `CHROME=/path/to/chrome`
+selects a system Chrome. Physics mode uses Playwright DOM extraction, without
+installing/downloading lmhtml. Run `npm ci` in a fresh lmwebtest worktree first.
+`--host` and `--v1-host` accept a hostname or full local HTTP origin.
+
+Default coverage is **every page**, every model and every exercise at **1280×900
+and 390×900**. The independent legacy index (default `v1.egtry.com`) supplies old
+slugs: the target index must list each, its lesson links must stay on the target
+origin, and every old/new lesson must return 200 at its original path. Index and
+lesson metadata, horizontal overflow, console/page errors and failed network
+requests are checked. A missing legacy slug is tested even if omitted from the
+target index. New lesson slugs are checked too.
+
+Each model canvas must contain varied pixels, change pixels at two separate
+moments while playing, stop changing when paused, advance with Step and stay
+paused afterward. Every exercise must show worked steps after a wrong answer;
+the visible solution supplies the answer, then reloading `?seed=731` must
+reproduce the problem and accept that answer; Next must change the problem.
+Missing widgets and unsupported contracts **fail**. A legacy static page is an
+expected negative baseline, never accepted as a completed R42 page. Static
+physical models need an explicit scientifically appropriate parameter-change
+adapter/check before acceptance; this suite currently requires time playback
+and does not exempt them or manufacture animation.
+
+Public DOM contract (coordinate with the physics framework owner):
+
+| Part | Default selector / state |
+|---|---|
+| Model root / scene | `[data-physics-model]` or `.physics-model`; first `canvas` (2D) |
+| Play / Pause / Step | `[data-action="play"]` (or `.ph-play`); Pause uses same button or `[data-action="pause"]`; `[data-action="step"]` (or `.ph-step`) |
+| Playing indication | Pause label or Play `aria-pressed="true"` |
+| Exercise root | `[data-physics-exercise]` or `.physics-exercise`; `data-state="open\|wrong\|shown\|right"` |
+| Input / Check / Next | `[data-answer-input]` (or text/number input); `[data-action="check"]`; `[data-action="next"]` |
+| Problem / solution | `[data-problem]`; `[data-worked-solution]` (visible worked steps after wrong answer) |
+| Visible worked answer | solution descendant `[data-solution-answer="6"]` (numeric/text value to type) or `[data-solution-answer]` whose text is the answer |
+| Feedback | `[role="status"]` or `.ph-feedback` |
+
+`--selectors FILE` merges a JSON object into the selectors in
+`physics-helper.mjs` (`model`, `canvas`, `play`, `pause`, `step`, `exercise`,
+`input`, `check`, `next`, `problem`, `solution`, `answer`, `feedback`). It adapts
+names only; it never suppresses checks. Seed reproduction and exercise state
+remain required. The learner-visible worked solution is used for the right
+answer test; no private engine internals or arbitrary expected answer is used.
+This is interaction QA, not independent scientific verification of that answer.
+
+Per-check PASS/FAIL evidence goes to `work/physics_report_<book>.json` and `.txt`;
+`--out-dir DIR` changes that directory. `--report FILE` additionally writes a
+Markdown table with Overall Verdict suitable for `v7-switch-<book>-qa.md`.
+Any failed check exits nonzero; invalid CLI arguments exit 2. `--pages N` keeps
+first/last plus seeded interior pages and marks the report **sample-only**;
+it is insufficient for whole-book signoff. Reports omit scientific judgement:
+agy QA must add tested revisions, severity and physical correctness findings.

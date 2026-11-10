@@ -1,0 +1,10 @@
+# Physics book QA. Browser and HTTP evidence live in physics-helper.mjs.
+# All browser work is serialized with the other egtry suites.
+let command = ["flock", "/tmp/browser-gate.lock", "node", "physics-helper.mjs"];
+for (i in range(0, args.len())) {
+  push(command, args.get(i, ""));
+}
+let result = system(command);
+println(result.get("stdout", ""));
+println(result.get("stderr", ""));
+exit(result.get("code", 1));
