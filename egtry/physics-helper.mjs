@@ -50,7 +50,7 @@ export async function runPhysicsQA(opt) {
   const helperSha256 = await hashFile(fileURLToPath(import.meta.url));
   const checksSha256 = await hashFile(new URL('./physics-checks.mjs', import.meta.url));
   const scenarioSource = opt.scenarios ? {file: opt.scenarios, sha256: await hashFile(opt.scenarios), families: Object.keys(scenarios)} : null;
-  const report = { helperSha256, checksSha256, scenarioSource, suite: 'egtry-physics', timestamp: new Date().toISOString(), book: opt.book, host: base, legacy, seed: opt.seed, checks: [], legacySlugs: [], targetSlugs: [], testedSlugs: [] };
+  const report = { scientificReview: 'NOT PERFORMED', helperSha256, checksSha256, scenarioSource, suite: 'egtry-physics', timestamp: new Date().toISOString(), book: opt.book, host: base, legacy, seed: opt.seed, checks: [], legacySlugs: [], targetSlugs: [], testedSlugs: [] };
   function check(ok, name, detail = '') {
     report.checks.push({ name, status: ok ? 'PASS' : 'FAIL', detail: String(detail) });
     console.log(`[${ok ? 'PASS' : 'FAIL'}] ${name}: ${detail}`);
@@ -247,7 +247,7 @@ export async function runPhysicsQA(opt) {
   await fs.writeFile(stem + '.txt', report.checks.map(c => `[${c.status}] ${c.name}: ${c.detail}`).join('\n') + '\n');
   if (opt.report) {
     const escape = s => String(s).replaceAll('|', '\\|').replaceAll('\n', ' ');
-    const markdown = `# QA Report: Physics book ${opt.book}\n\n- Date: ${report.timestamp}\n- Target: ${base}${prefix}\n- Legacy: ${legacy}${prefix}\n- Suite: lmwebtest/egtry/physics.lms + physics-helper.mjs (Playwright Chrome)\n- Seed: ${opt.seed}\n- Coverage: ${report.coverage || 'incomplete'}; ${report.testedSlugs.length} browser pages at 1280 and 390\n- **Overall Verdict**: **${report.status}** (${report.passed} passed, ${report.failed} failed)\n\n| Check | Verdict | Evidence |\n|---|---|---|\n` + report.checks.map(c => `| ${escape(c.name)} | ${c.status} | ${escape(c.detail)} |`).join('\n') + '\n';
+    const markdown = `# QA Report: Physics book ${opt.book}\n\n- Date: ${report.timestamp}\n- Target: ${base}${prefix}\n- Legacy: ${legacy}${prefix}\n- Suite: lmwebtest/egtry/physics.lms + physics-helper.mjs (Playwright Chrome)\n- Seed: ${opt.seed}\n- Coverage: ${report.coverage || 'incomplete'}; ${report.testedSlugs.length} browser pages at 1280 and 390\n- **Overall Verdict**: **${report.status}** (${report.passed} passed, ${report.failed} failed)\n- **Scientific Review**: NOT PERFORMED (automated interaction suite only)\n\n| Check | Verdict | Evidence |\n|---|---|---|\n` + report.checks.map(c => `| ${escape(c.name)} | ${c.status} | ${escape(c.detail)} |`).join('\n') + '\n';
     await fs.mkdir(path.dirname(path.resolve(opt.report)), { recursive: true }); await fs.writeFile(opt.report, markdown);
   }
   console.log(`Overall Verdict: ${report.status} (${report.passed} passed, ${report.failed} failed); ${stem}.json`);
