@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {chromium} from 'playwright';
-import {quantitySolver, workedReplay} from './physics-checks.mjs';
+import {quantitySolver, workedReplay, canvasPixels} from './physics-checks.mjs';
 
 test('quantity solvers need visible unit-aware results and changing worked steps', async () => {
   const browser = await chromium.launch(process.env.CHROME ? {executablePath:process.env.CHROME} : {});
   try {
-    for (const width of [1280,390]) for (const mode of ['good','dark-good','frozen-output','frozen-steps','hidden-steps','hidden-result','frozen-canvas','transparent-leaf','same-color-leaf','same-color-note','leaked-working']) {
+    for (const width of [1280,390]) for (const mode of ['good','dark-good','frozen-output','frozen-steps','hidden-steps','hidden-result','frozen-canvas','transparent-leaf','same-color-leaf','same-color-note','same-color-result','leaked-working']) {
       const page = await browser.newPage({viewport:{width,height:900}});
-      await page.setContent(`<section data-physics-solver style="${mode==='dark-good'?'background:#173f35;color:#f5f1dc':'background:white'}"><label>Mass (kg)<input data-quantity-parameter type="number" value="2" min="0"></label><output data-quantity-result ${mode==='hidden-result'?'hidden':''}>6 N</output><div class="mb-player"><button>Step</button><ol></ol></div></section>`);
+      await page.setContent(`<section data-physics-solver style="${mode==='dark-good'?'background:#173f35;color:#f5f1dc':'background:white'}"><label>Mass (kg)<input data-quantity-parameter type="number" value="2" min="0"></label><output data-quantity-result ${mode==='hidden-result'?'hidden':mode==='same-color-result'?'style="color:white"':''}>6 N</output><div class="mb-player"><button>Step</button><ol></ol></div></section>`);
       await page.evaluate(mode => {
         const input=document.querySelector('input'),output=document.querySelector('output'),button=document.querySelector('button'),ol=document.querySelector('ol');let count=1,value=6;
         const render=()=>{ol.innerHTML=Array.from({length:count},(_,i)=>`<li class="bb-step" ${mode==='hidden-steps'?'hidden':''}><div class="bb-line"><math display="block"><mtext ${mode==='transparent-leaf'?'style="opacity:0"':mode==='same-color-leaf'?'style="color:white"':''}>${mode==='leaked-working'?'e.force × e.cosine':i+' F = '+value+' N'}</mtext></math></div><p class="bb-note" ${mode==='same-color-note'?'style="color:white"':''}>Use the law, substitute, calculate and check.</p></li>`).join('');button.disabled=count===4;};
@@ -57,5 +57,19 @@ test('bounded microscopic parameters are probed at their own scale',async()=>{
   });
   const result=await quantitySolver(page.locator('section'),workedReplay);
   assert.notEqual(result.before,result.after);assert.equal(await page.locator('input').inputValue(),'0.000001');
+ }finally{await browser.close();}
+});
+
+
+test('canvas pixel evidence must also be perceptible through CSS and its ancestors',async()=>{
+ const browser=await chromium.launch(process.env.CHROME?{executablePath:process.env.CHROME}:{});
+ try{
+  const page=await browser.newPage();
+  for(const [parent,style,visible] of [['','','yes'],['','color:transparent','yes'],['','opacity:0','no'],['opacity:0','','no'],['','visibility:hidden','no'],['content-visibility:hidden','','no']]){
+   await page.setContent(`<div style="${parent}"><canvas width="100" height="100" style="${style}"></canvas></div>`);
+   await page.locator('canvas').evaluate(c=>{const x=c.getContext('2d');x.fillStyle='blue';x.fillRect(10,10,30,30);});
+   if(visible==='yes')assert.ok((await canvasPixels(page.locator('canvas'))).varied>20);
+   else await assert.rejects(()=>canvasPixels(page.locator('canvas')),/Canvas is hidden/);
+  }
  }finally{await browser.close();}
 });

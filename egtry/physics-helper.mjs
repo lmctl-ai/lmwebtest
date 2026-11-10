@@ -6,7 +6,7 @@ import {createHash} from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import {newBookReference} from './physics-reference.mjs';
-import { workedReplay, splitAnswer, quantitySolver } from './physics-checks.mjs';
+import { workedReplay, splitAnswer, quantitySolver, canvasPixels } from './physics-checks.mjs';
 
 // Public DOM contract; --selectors can adapt a framework without weakening checks.
 const defaults = {
@@ -177,17 +177,7 @@ export async function runPhysicsQA(opt) {
           for (let m = 0; m < modelCount; m++) await attempt(`Model ${m + 1} ${label}`, async () => {
             const model = models[m], canvas = model.locator(selectors.canvas).first();
             await canvas.waitFor({ state: 'visible' });
-            const pixels = async () => canvas.evaluate(el => {
-              const ctx = el.getContext('2d');
-              if (!ctx) throw Error('Expected Canvas 2D model');
-              const bytes = ctx.getImageData(0, 0, el.width, el.height).data;
-              let hash = 2166136261, varied = 0;
-              for (let i = 0; i < bytes.length; i += 4) {
-                if (bytes[i] !== bytes[0] || bytes[i+1] !== bytes[1] || bytes[i+2] !== bytes[2] || bytes[i+3] !== bytes[3]) varied++;
-                for (let j = 0; j < 4; j++) hash = Math.imul(hash ^ bytes[i+j], 16777619) >>> 0;
-              }
-              return { hash, varied, width: el.width, height: el.height };
-            });
+            const pixels = () => canvasPixels(canvas);
             const before = await pixels();
             require(before.varied > 20 && before.width > 20 && before.height > 20, `Blank canvas: ${JSON.stringify(before)}`);
             check(true, `Canvas nonblank ${m + 1} ${label}`, JSON.stringify(before));

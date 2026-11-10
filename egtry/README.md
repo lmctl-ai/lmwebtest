@@ -301,3 +301,21 @@ unwrapped `lmscript physics.lms` still acquires the gate normally.
 `node --test browser-lock.test.mjs` tests standalone/nested execution, mutual
 exclusion, stale context, descriptor lifetime, exit propagation and the actual
 LMScript entrypoint, using temporary locks and no Chrome process.
+
+### Visible model and quantity evidence
+
+Canvas pixels must be visible through the canvas element's CSS and ancestor
+opacity/visibility, as well as nonblank and changing. A transparent canvas cannot
+pass by animating its hidden backing buffer. Canvas text color does not affect
+painted pixels and is not used as a visibility rule. Quantity outputs must have
+visible ink against their composited background; dark chalkboards remain valid.
+
+A canvasless model root is exempt from canvas checks only when it explicitly
+advertises a supported quantity-solver contract, which is tested independently.
+A broken second model missing its canvas remains a failure.
+
+Run the targeted visibility/quantity regressions under the shared gate:
+
+```bash
+bash browser-lock.sh /tmp/browser-gate.lock node --test physics-quantity.test.mjs
+```

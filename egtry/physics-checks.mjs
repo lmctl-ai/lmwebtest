@@ -1,15 +1,33 @@
 // Behavioral checks shared by the physics CLI and its adversarial fixtures.
-async function perceptible(locator) {
+async function perceptible(locator, {ink = true} = {}) {
   if (!await locator.isVisible()) return false;
-  return locator.evaluate(el => {
+  return locator.evaluate((el, ink) => {
     const rect=el.getBoundingClientRect();
     if(rect.width<1 || rect.height<1) return false;
     for(let node=el;node;node=node.parentElement) {
       const style=getComputedStyle(node);
       if(Number(style.opacity)<.05 || style.visibility==='hidden' || style.display==='none' || style.contentVisibility==='hidden') return false;
     }
-    const color=getComputedStyle(el).color;
-    return !/rgba\([^)]*,\s*0\)/.test(color) && color!=='transparent';
+    if(!ink)return true;
+    const rgba=text=>{const m=/^rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)$/.exec(text);return m?[Number(m[1]),Number(m[2]),Number(m[3]),m[4]===undefined?1:Number(m[4])]:null;};
+    const color=getComputedStyle(el).color,foreground=rgba(color);
+    if(color==='transparent'||foreground?.[3]===0)return false;
+    if(!foreground)return true;
+    const layers=[];for(let node=el;node;node=node.parentElement){const c=rgba(getComputedStyle(node).backgroundColor);if(c)layers.push(c);}
+    let background=[255,255,255];for(const c of layers.reverse())background=background.map((v,i)=>c[i]*c[3]+v*(1-c[3]));
+    return background.some((v,i)=>Math.abs(foreground[i]*foreground[3]+v*(1-foreground[3])-v)>2);
+  }, ink);
+}
+export async function canvasPixels(canvas) {
+  if(!await perceptible(canvas,{ink:false}))throw Error('Canvas is hidden');
+  return canvas.evaluate(el=>{
+    const ctx=el.getContext('2d');if(!ctx)throw Error('Expected Canvas 2D model');
+    const bytes=ctx.getImageData(0,0,el.width,el.height).data;let hash=2166136261,varied=0;
+    for(let i=0;i<bytes.length;i+=4){
+      if(bytes[i]!==bytes[0]||bytes[i+1]!==bytes[1]||bytes[i+2]!==bytes[2]||bytes[i+3]!==bytes[3])varied++;
+      for(let j=0;j<4;j++)hash=Math.imul(hash^bytes[i+j],16777619)>>>0;
+    }
+    return {hash,varied,width:el.width,height:el.height};
   });
 }
 export function validateWorkedText(contents) {
