@@ -265,22 +265,26 @@ the marker before the lead's switch gate accepts its Overall PASS.
 
 ### Optional parallel lesson pages
 
-`--workers 2` runs two lesson pages concurrently in ONE Chrome browser while
+`--workers 4` runs up to four lesson pages concurrently in ONE Chrome browser while
 `physics.lms` retains `/tmp/browser-gate.lock`. Default is `--workers 1`;
-only 1 and 2 are supported. Every selected page still runs all model/exercise,
+integer worker counts from 1 through 4 are supported. Every selected page still runs all model/exercise,
 console/network and layout checks at BOTH widths. Index discovery and exhaustive
 HTTP coverage are unchanged. Reports record requested workers and actual peak
 concurrent lesson pages; progress includes the active pages. Named checks can
 interleave, so assess them by URL/width rather than output order.
 
 The full adversarial fixture compares the complete named check set between serial
-and parallel runs and verifies two active pages, four completed visits and every
+runs at one, two and four workers and verifies four active pages, eight completed visits and every
 mutation rejection. A separate real-model Mechanics smoke covers actual animated
 and static models; sampling remains explicitly `sample-only` and cannot substitute
-for whole-book acceptance.
+for whole-book acceptance. The four-page positive fixture took 43.8 s serial,
+23.3 s with two workers and 13.8 s with four on the validation machine. All
+three modes emitted the SAME 150 named checks; all adversarial variants fail.
+The real four-page Mechanics smoke passed 210/0 at both widths with peak four
+active pages (animated/static models and eight exercise flows).
 
 ```bash
-./run.sh --physics --book mechanics --host HOST --workers 2 --report REPORT.md
+./run.sh --physics --book mechanics --host HOST --workers 4 --report REPORT.md
 ```
 
 

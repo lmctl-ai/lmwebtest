@@ -41,7 +41,7 @@ function options(args) {
   const out = { book: 'mechanics', host: 'www.egtry.com', 'v1-host': 'v1.egtry.com', pages: 'all', seed: '731', workers:'1' };
   const keys = new Set([...Object.keys(out), 'report', 'selectors', 'out-dir', 'scenarios', 'inventory']);
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--help') { console.log('physics.lms --book SLUG --host HOST [--v1-host HOST] [--pages N|all] [--seed N] [--selectors FILE] [--report FILE] [--out-dir DIR] [--scenarios FILE] [--inventory FILE] [--workers 1..2]'); process.exit(0); }
+    if (args[i] === '--help') { console.log('physics.lms --book SLUG --host HOST [--v1-host HOST] [--pages N|all] [--seed N] [--selectors FILE] [--report FILE] [--out-dir DIR] [--scenarios FILE] [--inventory FILE] [--workers 1..4]'); process.exit(0); }
     const key = args[i].replace(/^--/, '');
     if (!args[i].startsWith('--') || !keys.has(key) || !args[i + 1] || args[i + 1].startsWith('--')) throw Error(`Invalid option: ${args[i]}`);
     out[key] = args[++i];
@@ -54,7 +54,7 @@ function options(args) {
 const origin = value => new URL(value.includes('://') ? value : `https://${value}`).origin;
 export async function runPhysicsQA(opt) {
   const workerCount=Number(opt.workers??1);
-  if(!Number.isInteger(workerCount)||workerCount<1||workerCount>2)throw Error('--workers must be 1 or 2');
+  if(!Number.isInteger(workerCount)||workerCount<1||workerCount>4)throw Error('--workers must be an integer from 1 to 4');
   const selectors = { ...defaults, ...(opt.selectors ? JSON.parse(await fs.readFile(opt.selectors, 'utf8')) : {}) };
   const scenarios = opt.scenarios ? JSON.parse(await fs.readFile(opt.scenarios, 'utf8')) : {};
   const casesFor = async root => {
