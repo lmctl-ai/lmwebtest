@@ -32,7 +32,7 @@ for arg in "$@"; do
     echo "  --min-fit-pct <P>          Minimum % of 40-example sample fitting without scroll in --home mode (default: 95)"
     echo "  --v1-host <host>           Legacy host for tracks comparison in default curl+lmhtml mode (default: v1.egtry.com)"
     echo "  --url-map <path>           Path to url-map.json in default curl+lmhtml mode"
-    echo "  Physics defaults: mechanics, all pages at 1280/390; also --report FILE, --selectors FILE, --out-dir DIR (see README)"
+    echo "  Physics defaults: mechanics, all pages at 1280/390; also --report FILE, --selectors FILE, --out-dir DIR, --scenarios FILE, --inventory FILE (see README)"
     echo "  --help, -h                 Show this help message and exit"
     exit 0
   elif [ "$arg" = "--physics" ]; then

@@ -6,18 +6,18 @@ import {quantitySolver, workedReplay} from './physics-checks.mjs';
 test('quantity solvers need visible unit-aware results and changing worked steps', async () => {
   const browser = await chromium.launch(process.env.CHROME ? {executablePath:process.env.CHROME} : {});
   try {
-    for (const width of [1280,390]) for (const mode of ['good','frozen-output','frozen-steps','hidden-steps','hidden-result','frozen-canvas']) {
+    for (const width of [1280,390]) for (const mode of ['good','frozen-output','frozen-steps','hidden-steps','hidden-result','frozen-canvas','transparent-leaf','leaked-working']) {
       const page = await browser.newPage({viewport:{width,height:900}});
       await page.setContent(`<section data-physics-solver><label>Mass (kg)<input data-quantity-parameter type="number" value="2" min="0"></label><output data-quantity-result ${mode==='hidden-result'?'hidden':''}>6 N</output><div class="mb-player"><button>Step</button><ol></ol></div></section>`);
       await page.evaluate(mode => {
         const input=document.querySelector('input'),output=document.querySelector('output'),button=document.querySelector('button'),ol=document.querySelector('ol');let count=1,value=6;
-        const render=()=>{ol.innerHTML=Array.from({length:count},(_,i)=>`<li class="bb-step" ${mode==='hidden-steps'?'hidden':''}><div class="bb-line">${i} F = ${value} N</div><p class="bb-note">Use the law, substitute, calculate and check.</p></li>`).join('');button.disabled=count===4;};
+        const render=()=>{ol.innerHTML=Array.from({length:count},(_,i)=>`<li class="bb-step" ${mode==='hidden-steps'?'hidden':''}><div class="bb-line"><math display="block"><mtext ${mode==='transparent-leaf'?'style="opacity:0"':''}>${mode==='leaked-working'?'e.force × e.cosine':i+' F = '+value+' N'}</mtext></math></div><p class="bb-note">Use the law, substitute, calculate and check.</p></li>`).join('');button.disabled=count===4;};
         button.onclick=()=>{count++;render();};
         input.onchange=()=>{if(mode!=='frozen-output')output.textContent=Number(input.value)*3+' N';if(mode!=='frozen-steps')value=Number(input.value)*3;count=1;render();};render();
       },mode);
       const run=()=>quantitySolver(page.locator('section'),workedReplay,{observe:async()=>mode==='frozen-canvas'?'fixed':page.locator('output').textContent()});
       if(mode==='good') assert.equal((await run()).after,'9 N');
-      else await assert.rejects(run, /hidden|do not change|steps did not|canvas/);
+      else await assert.rejects(run, /hidden|do not change|steps did not|canvas|leaks/);
       await page.close();
     }
   } finally {await browser.close();}

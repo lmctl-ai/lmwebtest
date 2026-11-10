@@ -234,3 +234,26 @@ node scripts/physics/qa-scenarios.mjs --book BOOK --out /tmp/BOOK-qa-inputs.json
 Reports record the helper/check module SHA-256 hashes at execution and the
 scenario file hash, which identifies code/input evidence even while worktrees
 are awaiting the shared browser lock.
+
+### New books, readable procedures and queued-run progress
+
+`--inventory /path/to/interp-docs/durable-memory/physics-track-inventory.json`
+keeps the live v1 baseline for **every old book**. Only a book explicitly listed
+in `new_books` (and absent from `books`) uses its planned chapter/page slugs as
+its independent reference, since that new URL has no v1 predecessor. Its report
+says `Legacy: none (new book; committed physics inventory)` and records the
+inventory hash. Missing/duplicate/unsafe planned slugs fail; an old book can
+never gain an exemption merely by also appearing in `new_books`.
+
+Replay extraction batches DOM reads while preserving Step advancement, visible
+MathML equations and notes, and hidden/transparent descendant detection. Equations
+must not expose program properties (`e.force`), arrow functions, template fragments,
+undefined/NaN/Infinity values, or a numeric-substitution caption without numbers.
+The independent scientific review remains necessary; readable text alone cannot
+prove a physical derivation.
+
+`work/physics_progress_<book>.json` (or the selected `--out-dir`) is atomically
+updated with current page/width, completed visits, counts, last failure and code
+hashes during a long run. Final reports remain exhaustive. The automated report
+marks Scientific Review NOT PERFORMED; agy must complete that review and change
+the marker before the lead's switch gate accepts its Overall PASS.

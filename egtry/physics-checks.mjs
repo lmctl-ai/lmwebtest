@@ -12,32 +12,62 @@ async function perceptible(locator) {
     return !/rgba\([^)]*,\s*0\)/.test(color) && color!=='transparent';
   });
 }
+export function validateWorkedText(contents) {
+  for(const {equation,explanation} of contents) {
+    if(/(?:=>|\$\{|\bundefined\b|\bNaN\b|\bInfinity\b|\[object Object\]|\b[A-Za-z_$][\w$]*\.[A-Za-z_$][\w$]*)/.test(equation))throw Error('Worked replay leaks code or an invalid value: '+equation);
+    if(/numerical\s+(?:SI\s+)?inputs/i.test(explanation)&&!/[0-9]/.test(equation))throw Error('Numeric substitution contains no substituted numbers: '+equation);
+  }
+}
+
 export async function workedReplay(scope, {player = '.mb-player', steps = '.bb-step', line = '.bb-line', note = '.bb-note'} = {}) {
   const board = scope.locator(player).first();
-  await board.waitFor({state: 'visible', timeout: 4000});
-  const step = board.getByRole('button', {name: 'Step', exact: true});
-  const snapshots = [];
-  for (let i = 0; i < 100; i++) {
-    const rows = board.locator(steps);
-    const contents = [];
-    for (let r = 0; r < await rows.count(); r++) {
-      const row = rows.nth(r);
-      if (!await perceptible(row)) throw Error('Worked step is hidden');
-      const equation = row.locator(line).first(), caption = row.locator(note).first();
-      if (!await perceptible(equation) || !await perceptible(caption)) throw Error('Worked equation or explanation is hidden');
-      const eq = (await equation.textContent()).trim(), text = (await caption.innerText()).trim();
-      if (!eq || !text) throw Error('Worked equation or explanation is empty');
-      contents.push({equation: eq, explanation: text});
-    }
-    snapshots.push(contents);
-    if (await step.isDisabled()) {
-      if (contents.length < 4) throw Error('Worked solution needs the law, substitution, calculation and check');
-      if (!snapshots.some((s, i) => i && s.length > snapshots[i-1].length)) throw Error('Worked replay never advances step by step');
+  await board.waitFor({state:'visible',timeout:4000});
+  const step = board.getByRole('button',{name:'Step',exact:true});
+  const handle=await board.elementHandle(),snapshots=[];
+  for(let i=0;i<100;i++) {
+    // Read one consistent DOM snapshot; avoid a protocol round trip per text node.
+    const snapshot=await board.evaluate((node,selectors)=>{
+      const cache=new Map();
+      function visible(el) {
+        if(!el)return false;
+        if(cache.has(el))return cache.get(el);
+        const rect=el.getBoundingClientRect(),style=getComputedStyle(el);
+        const own=rect.width>=1&&rect.height>=1&&style.display!=='none'&&style.visibility!=='hidden'&&style.contentVisibility!=='hidden'&&Number(style.opacity)>=.05;
+        let ok=own;
+        for(let parent=el.parentElement;ok&&parent;parent=parent.parentElement) {
+          const style=getComputedStyle(parent);
+          if(style.display==='none'||style.visibility==='hidden'||style.contentVisibility==='hidden'||Number(style.opacity)<.05)ok=false;
+        }
+        cache.set(el,ok);return ok;
+      }
+      function readable(el) {
+        if(!visible(el))return false;
+        const walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);let text,seen=false;
+        while(text=walker.nextNode()) {
+          if(!text.textContent.trim()||text.parentElement.closest('annotation, annotation-xml, mphantom'))continue;
+          seen=true;const parent=text.parentElement,color=getComputedStyle(parent).color;
+          if(!visible(parent)||color==='transparent'||/rgba\([^)]*,\s*0\)/.test(color))return false;
+        }
+        return seen;
+      }
+      const contents=[];
+      for(const row of node.querySelectorAll(selectors.steps)) {
+        if(!visible(row))return {error:'Worked step is hidden'};
+        const equation=row.querySelector(selectors.line),caption=row.querySelector(selectors.note);
+        if(!readable(equation)||!readable(caption))return {error:'Worked equation or explanation is hidden or empty'};
+        contents.push({equation:equation.textContent.trim(),explanation:caption.innerText.trim()});
+      }
+      return {contents};
+    },{steps,line,note});
+    if(snapshot.error)throw Error(snapshot.error);
+    const contents=snapshot.contents;validateWorkedText(contents);snapshots.push(contents);
+    if(await step.isDisabled()) {
+      if(contents.length<4)throw Error('Worked solution needs the law, substitution, calculation and check');
+      if(!snapshots.some((s,i)=>i&&s.length>snapshots[i-1].length))throw Error('Worked replay never advances step by step');
       return contents;
     }
-    const count = contents.length;
-    await step.click(); // Stops autoplay as well as advancing the shared player.
-    await scope.page().waitForFunction(({element, selector, count}) => element.querySelectorAll(selector).length > count, {element: await board.elementHandle(), selector: steps, count}, {timeout: 4000});
+    await step.click();
+    await scope.page().waitForFunction(({element,selector,count})=>element.querySelectorAll(selector).length>count,{element:handle,selector:steps,count:contents.length},{timeout:4000});
   }
   throw Error('Worked replay did not finish within 100 steps');
 }
