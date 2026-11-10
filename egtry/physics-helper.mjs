@@ -26,10 +26,10 @@ const defaults = {
   answer: '[data-solution-answer]', feedback: '[role="status"], .ph-feedback',
 };
 function options(args) {
-  const out = { book: 'mechanics', host: 'www.egtry.com', 'v1-host': 'v1.egtry.com', pages: 'all', seed: '731' };
+  const out = { book: 'mechanics', host: 'www.egtry.com', 'v1-host': 'v1.egtry.com', pages: 'all', seed: '731', workers:'1' };
   const keys = new Set([...Object.keys(out), 'report', 'selectors', 'out-dir', 'scenarios', 'inventory']);
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--help') { console.log('physics.lms --book SLUG --host HOST [--v1-host HOST] [--pages N|all] [--seed N] [--selectors FILE] [--report FILE] [--out-dir DIR] [--scenarios FILE] [--inventory FILE]'); process.exit(0); }
+    if (args[i] === '--help') { console.log('physics.lms --book SLUG --host HOST [--v1-host HOST] [--pages N|all] [--seed N] [--selectors FILE] [--report FILE] [--out-dir DIR] [--scenarios FILE] [--inventory FILE] [--workers 1..2]'); process.exit(0); }
     const key = args[i].replace(/^--/, '');
     if (!args[i].startsWith('--') || !keys.has(key) || !args[i + 1] || args[i + 1].startsWith('--')) throw Error(`Invalid option: ${args[i]}`);
     out[key] = args[++i];
@@ -41,6 +41,8 @@ function options(args) {
 }
 const origin = value => new URL(value.includes('://') ? value : `https://${value}`).origin;
 export async function runPhysicsQA(opt) {
+  const workerCount=Number(opt.workers??1);
+  if(!Number.isInteger(workerCount)||workerCount<1||workerCount>2)throw Error('--workers must be 1 or 2');
   const selectors = { ...defaults, ...(opt.selectors ? JSON.parse(await fs.readFile(opt.selectors, 'utf8')) : {}) };
   const scenarios = opt.scenarios ? JSON.parse(await fs.readFile(opt.scenarios, 'utf8')) : {};
   const casesFor = async root => {
@@ -54,13 +56,14 @@ export async function runPhysicsQA(opt) {
   const helperSha256 = await hashFile(fileURLToPath(import.meta.url));
   const checksSha256 = await hashFile(new URL('./physics-checks.mjs', import.meta.url));
   const scenarioSource = opt.scenarios ? {file: opt.scenarios, sha256: await hashFile(opt.scenarios), families: Object.keys(scenarios)} : null;
-  const report = { referencePolicy: planned ? 'new-book-inventory' : 'live-legacy-index', scientificReview: 'NOT PERFORMED', helperSha256, checksSha256, scenarioSource, suite: 'egtry-physics', timestamp: new Date().toISOString(), book: opt.book, host: base, legacy, seed: opt.seed, checks: [], legacySlugs: [], targetSlugs: [], testedSlugs: [] };
+  const report = { referencePolicy: planned ? 'new-book-inventory' : 'live-legacy-index', scientificReview: 'NOT PERFORMED', workers:workerCount, helperSha256, checksSha256, scenarioSource, suite: 'egtry-physics', timestamp: new Date().toISOString(), book: opt.book, host: base, legacy, seed: opt.seed, checks: [], legacySlugs: [], targetSlugs: [], testedSlugs: [] };
   const dir = opt['out-dir'] || path.join(path.dirname(fileURLToPath(import.meta.url)), 'work');
   await fs.mkdir(dir, {recursive:true});
   const progressPath = path.join(dir, `physics_progress_${opt.book}.json`);
-  let passedSoFar=0,failedSoFar=0,visited=0,current=null,lastFailure=null;
+  let passedSoFar=0,failedSoFar=0,visited=0,current=null,lastFailure=null,maxConcurrentPages=0;
+  const active=new Map();
   function progress(phase,complete=false) {
-    const state={book:opt.book,host:base,timestamp:new Date().toISOString(),phase,complete,visited,current,passed:passedSoFar,failed:failedSoFar,lastFailure,helperSha256,checksSha256};
+    const state={book:opt.book,host:base,timestamp:new Date().toISOString(),phase,complete,visited,current,active:[...active.values()],passed:passedSoFar,failed:failedSoFar,lastFailure,helperSha256,checksSha256};
     writeFileSync(progressPath+'.tmp',JSON.stringify(state,null,2)+'\n');renameSync(progressPath+'.tmp',progressPath);
   }
   progress('Starting');
@@ -137,7 +140,7 @@ export async function runPhysicsQA(opt) {
         check(!indexErrors.length, `Index console/network ${width}`, indexErrors.join('; ') || '0 errors');
         check(await index.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `Index layout ${width}`, 'no horizontal overflow');
       });
-      for (const lesson of selected) {
+      const visitLesson=async lesson=>{
         const page = await context.newPage();
         await page.setViewportSize({ width, height: 900 }); page.setDefaultTimeout(4000);
         const errors = [];
@@ -145,7 +148,7 @@ export async function runPhysicsQA(opt) {
         page.on('pageerror', e => errors.push(`pageerror: ${e.message}`));
         page.on('response', r => { if (r.status() >= 400) errors.push(`HTTP ${r.status()} ${r.url()}`); });
         page.on('requestfailed', r => { if (r.failure()?.errorText !== 'net::ERR_ABORTED') errors.push(`request: ${r.url()} ${r.failure()?.errorText}`); });
-        const label = `${lesson} @${width}`;current={lesson,width};
+        const label = `${lesson} @${width}`;current={lesson,width};active.set(label,current);maxConcurrentPages=Math.max(maxConcurrentPages,active.size);
         await attempt(`Load ${label}`, async () => {
           const response = await page.goto(`${base}${lesson}?seed=${opt.seed}`, { waitUntil: 'networkidle', timeout: 30000 });
           require(response?.status() === 200, `HTTP ${response?.status()}`);
@@ -251,12 +254,18 @@ export async function runPhysicsQA(opt) {
           });
         });
         check(!errors.length, `Console/network ${label}`, errors.length ? errors.join('; ') : '0 console, page or network errors');
-        await page.close();visited++;progress('Page complete');
-      }
+        await page.close();active.delete(label);visited++;current=active.values().next().value??null;progress('Page complete');
+      };
+      let cursor=0;
+      const results=await Promise.allSettled(Array.from({length:Math.min(workerCount,selected.length)},async()=>{
+        while(cursor<selected.length){const lesson=selected[cursor++];await visitLesson(lesson);}
+      }));
+      for(const result of results)if(result.status==='rejected')check(false,`Page worker @${width}`,result.reason?.stack??result.reason);
     }
     await context.close();
   } catch (e) { check(false, 'Suite execution', e.stack || e.message); }
   finally { if (browser) await browser.close(); }
+  report.maxConcurrentPages=maxConcurrentPages;
   report.passed = report.checks.filter(c => c.status === 'PASS').length;
   report.failed = report.checks.filter(c => c.status === 'FAIL').length;
   report.status = report.failed ? 'FAIL' : 'PASS';
@@ -266,7 +275,7 @@ export async function runPhysicsQA(opt) {
   await fs.writeFile(stem + '.txt', report.checks.map(c => `[${c.status}] ${c.name}: ${c.detail}`).join('\n') + '\n');
   if (opt.report) {
     const escape = s => String(s).replaceAll('|', '\\|').replaceAll('\n', ' ');
-    const markdown = `# QA Report: Physics book ${opt.book}\n\n- Date: ${report.timestamp}\n- Target: ${base}${prefix}\n- Legacy: ${planned ? 'none (new book; committed physics inventory)' : legacy+prefix}\n- Suite: lmwebtest/egtry/physics.lms + physics-helper.mjs (Playwright Chrome)\n- Seed: ${opt.seed}\n- Coverage: ${report.coverage || 'incomplete'}; ${report.testedSlugs.length} browser pages at 1280 and 390\n- **Overall Verdict**: **${report.status}** (${report.passed} passed, ${report.failed} failed)\n- **Scientific Review**: NOT PERFORMED (automated interaction suite only)\n\n| Check | Verdict | Evidence |\n|---|---|---|\n` + report.checks.map(c => `| ${escape(c.name)} | ${c.status} | ${escape(c.detail)} |`).join('\n') + '\n';
+    const markdown = `# QA Report: Physics book ${opt.book}\n\n- Date: ${report.timestamp}\n- Target: ${base}${prefix}\n- Legacy: ${planned ? 'none (new book; committed physics inventory)' : legacy+prefix}\n- Suite: lmwebtest/egtry/physics.lms + physics-helper.mjs (Playwright Chrome)\n- Seed: ${opt.seed}\n- Page workers: ${workerCount} (one Chrome browser under flock)\n- Coverage: ${report.coverage || 'incomplete'}; ${report.testedSlugs.length} browser pages at 1280 and 390\n- **Overall Verdict**: **${report.status}** (${report.passed} passed, ${report.failed} failed)\n- **Scientific Review**: NOT PERFORMED (automated interaction suite only)\n\n| Check | Verdict | Evidence |\n|---|---|---|\n` + report.checks.map(c => `| ${escape(c.name)} | ${c.status} | ${escape(c.detail)} |`).join('\n') + '\n';
     await fs.mkdir(path.dirname(path.resolve(opt.report)), { recursive: true }); await fs.writeFile(opt.report, markdown);
   }
   console.log(`Overall Verdict: ${report.status} (${report.passed} passed, ${report.failed} failed); ${stem}.json`);

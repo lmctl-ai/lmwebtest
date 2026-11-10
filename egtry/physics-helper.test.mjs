@@ -46,10 +46,19 @@ test('physics QA proves behavior and rejects broken pages', { timeout: 420000 },
   });
   await Promise.all([new Promise(r => legacy.listen(0, '127.0.0.1', r)), new Promise(r => target.listen(0, '127.0.0.1', r))]);
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'physics-qa-test-'));
-  const opt = { book: 'mechanics', host: `http://127.0.0.1:${target.address().port}`, 'v1-host': `http://127.0.0.1:${legacy.address().port}`, pages: 'all', seed: '731', 'out-dir': dir, report: path.join(dir, 'report.md') };
+  const opt = { book: 'mechanics', host: `http://127.0.0.1:${target.address().port}`, 'v1-host': `http://127.0.0.1:${legacy.address().port}`, pages: 'all', seed: '731', workers:'2', 'out-dir': dir, report: path.join(dir, 'report.md') };
   try {
+    const serialStart=Date.now();
+    const serial=await runPhysicsQA({...opt,workers:'1','out-dir':path.join(dir,'serial')});
+    const serialMs=Date.now()-serialStart,parallelStart=Date.now();
     const good = await runPhysicsQA(opt);
+    console.log('Good-fixture elapsed milliseconds:',JSON.stringify({serial:serialMs,parallel:Date.now()-parallelStart}));
+    assert.equal(serial.status,'PASS');assert.equal(serial.maxConcurrentPages,1);
+    assert.deepEqual(good.checks.map(c=>c.name).sort(),serial.checks.map(c=>c.name).sort(),'parallel mode preserves every serial check');
     assert.equal(good.status, 'PASS'); assert.equal(good.testedSlugs.length, 2);
+    assert.equal(good.workers,2);assert.equal(good.maxConcurrentPages,2);
+    const progress=JSON.parse(await fs.readFile(path.join(dir,'physics_progress_mechanics.json'),'utf8'));
+    assert.equal(progress.visited,4);assert.equal(progress.complete,true);assert.deepEqual(progress.active,[]);
     assert.equal(good.checks.filter(c => c.name.startsWith('Right answer accepted')).length, 4);
     assert.match(await fs.readFile(opt.report, 'utf8'), /Overall Verdict.*PASS/);
     for (const [variant, expected] of [['broken', 'Animation pixels'], ['accept-wrong', 'Exercise 1'], ['next', 'Exercise 1'], ['console', 'Console/network'], ['hidden-steps', 'Model 1'], ['transparent-steps', 'Model 1'], ['visible-answer-mismatch', 'Exercise 1'], ['prose-only', 'Exercise 1'], ['accept-valid-unit-wrong', 'Exercise 1'], ['accept-wrong-dimension', 'Exercise 1'], ['missing', 'Index lists every old slug']]) {

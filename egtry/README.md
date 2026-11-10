@@ -261,3 +261,24 @@ updated with current page/width, completed visits, counts, last failure and code
 hashes during a long run. Final reports remain exhaustive. The automated report
 marks Scientific Review NOT PERFORMED; agy must complete that review and change
 the marker before the lead's switch gate accepts its Overall PASS.
+
+
+### Optional parallel lesson pages
+
+`--workers 2` runs two lesson pages concurrently in ONE Chrome browser while
+`physics.lms` retains `/tmp/browser-gate.lock`. Default is `--workers 1`;
+only 1 and 2 are supported. Every selected page still runs all model/exercise,
+console/network and layout checks at BOTH widths. Index discovery and exhaustive
+HTTP coverage are unchanged. Reports record requested workers and actual peak
+concurrent lesson pages; progress includes the active pages. Named checks can
+interleave, so assess them by URL/width rather than output order.
+
+The full adversarial fixture compares the complete named check set between serial
+and parallel runs and verifies two active pages, four completed visits and every
+mutation rejection. A separate real-model Mechanics smoke covers actual animated
+and static models; sampling remains explicitly `sample-only` and cannot substitute
+for whole-book acceptance.
+
+```bash
+./run.sh --physics --book mechanics --host HOST --workers 2 --report REPORT.md
+```
