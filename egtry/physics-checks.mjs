@@ -40,13 +40,27 @@ export async function workedReplay(scope, {player = '.mb-player', steps = '.bb-s
         }
         cache.set(el,ok);return ok;
       }
+      // Bounding boxes and opacity alone do not detect white-on-white steps.
+      // Composite ordinary CSS backgrounds from the page inward before comparing ink.
+      function indistinguishableInk(el) {
+        const rgba=text=>{
+          const m=/^rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)$/.exec(text);
+          return m?[Number(m[1]),Number(m[2]),Number(m[3]),m[4]===undefined?1:Number(m[4])]:null;
+        };
+        const ink=rgba(getComputedStyle(el).color);if(!ink)return false;
+        const layers=[];
+        for(let node=el;node;node=node.parentElement){const color=rgba(getComputedStyle(node).backgroundColor);if(color)layers.push(color);}
+        let background=[255,255,255];
+        for(const color of layers.reverse())background=background.map((channel,i)=>color[i]*color[3]+channel*(1-color[3]));
+        return background.every((channel,i)=>Math.abs(ink[i]*ink[3]+channel*(1-ink[3])-channel)<=2);
+      }
       function readable(el) {
         if(!visible(el))return false;
         const walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);let text,seen=false;
         while(text=walker.nextNode()) {
           if(!text.textContent.trim()||text.parentElement.closest('annotation, annotation-xml, mphantom'))continue;
           seen=true;const parent=text.parentElement,color=getComputedStyle(parent).color;
-          if(!visible(parent)||color==='transparent'||/rgba\([^)]*,\s*0\)/.test(color))return false;
+          if(!visible(parent)||color==='transparent'||/rgba\([^)]*,\s*0\)/.test(color)||indistinguishableInk(parent))return false;
         }
         return seen;
       }
@@ -159,6 +173,7 @@ export async function quantitySolver(root, replay, {parameter = '[data-quantity-
       const after=(await output.innerText()).trim();
       if(after!==before) {
         splitAnswer(answerText(after));
+        if(observe&&JSON.stringify(await observe())===JSON.stringify(initialObservation)) throw Error('Static model canvas did not reflect changed parameters');
         const changedSteps=await replay(root);
         if(JSON.stringify(changedSteps)===JSON.stringify(originalSteps)) throw Error('Quantity output changed but worked steps did not');
         await ai.fill(ar); await bi.fill(br); await apply.first().click();

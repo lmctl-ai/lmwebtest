@@ -154,7 +154,7 @@ export async function runPhysicsQA(opt) {
           const models = page.locator(selectors.model);
           const modelCount = await models.count();
           const solvers = page.locator(selectors.solver), solverCount = await solvers.count();
-          check(modelCount + solverCount > 0, `Model present ${label}`, `${modelCount} time models, ${solverCount} quantity solvers`);
+          check(modelCount + solverCount > 0, `Model present ${label}`, `${modelCount} model applets, ${solverCount} quantity solvers`);
           for (let q = 0; q < solverCount; q++) await attempt(`Quantity solver ${q + 1} ${label}`, async () => {
             const evidence = await quantitySolver(solvers.nth(q), replay, {parameter: selectors.parameter, result: selectors.result, scenarios: await casesFor(solvers.nth(q))});
             check(true, `Quantity parameters/worked steps ${q + 1} ${label}`, JSON.stringify(evidence));

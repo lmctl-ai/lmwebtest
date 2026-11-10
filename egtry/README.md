@@ -179,7 +179,7 @@ The suite now completes the **actual worked replay**, using the shared
 `.mb-player` Step control: equations AND explanatory notes must be perceptible,
 steps must advance, and the completed board must include at least the law,
 substitution, calculation and check. A prose/answer-only box, hidden steps,
-transparent steps or a hidden answer fails. The visible dimensioned answer must
+transparent steps, same-colour text on a solid background or a hidden answer fails. The visible dimensioned answer must
 agree with its answer attribute. After revealing a solution, the suite also
 reloads and rejects a numerically wrong value WITH VALID UNITS, then a value
 with incompatible dimensions, before testing the correct answer and Next.
@@ -201,7 +201,8 @@ by `:` or `=`). An explicit `[data-action=calculate]` is clicked when present;
 automatic change handlers are supported too. The finite real-amplitude adapter
 can change `a` AND `b` together through Calculate to preserve normalization; it
 tries normalized basis and 3–4–5 pairs rather than perturbing a constrained state
-one coordinate at a time. This is an interaction probe, not a new source model.
+one coordinate at a time. When a canvas is present, that coordinated change must
+update its pixels too. This is an interaction probe, not a new source model.
 Other constrained state spaces need an explicit scientifically valid adapter.
 
 Additional selector keys are `solver`, `parameter`, `result`, `staticParameter`,
@@ -215,7 +216,8 @@ flock /tmp/browser-gate.lock node --test --test-concurrency=1 \
 ```
 
 The fixtures additionally reject frozen calculator outputs, output changes with
-stale steps, hidden results, answer attributes inconsistent with visible answers,
+stale steps, hidden/same-colour equations or captions, frozen canvases after
+coordinated normalized inputs, hidden results, answer attributes inconsistent with visible answers,
 and accepting valid-unit wrong answers or incompatible dimensions. These fixtures
 establish suite sensitivity; they do not certify a book's scientific correctness.
 
@@ -246,7 +248,9 @@ inventory hash. Missing/duplicate/unsafe planned slugs fail; an old book can
 never gain an exemption merely by also appearing in `new_books`.
 
 Replay extraction batches DOM reads while preserving Step advancement, visible
-MathML equations and notes, and hidden/transparent descendant detection. Equations
+MathML equations and notes, and hidden/transparent descendant detection. Ink is
+compared against composited solid CSS backgrounds; readable light chalk on a dark
+board remains supported. Equations
 must not expose program properties (`e.force`), arrow functions, template fragments,
 undefined/NaN/Infinity values, or a numeric-substitution caption without numbers.
 The independent scientific review remains necessary; readable text alone cannot
