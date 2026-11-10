@@ -157,7 +157,7 @@ export async function runPhysicsQA(opt) {
             require(before.varied > 20 && before.width > 20 && before.height > 20, `Blank canvas: ${JSON.stringify(before)}`);
             check(true, `Canvas nonblank ${m + 1} ${label}`, JSON.stringify(before));
             const mode = await model.getAttribute('data-model-mode');
-            if (mode === 'static' || ['quantity', 'quantity-solver', 'static'].includes(await model.getAttribute('data-model-kind'))) {
+            if (mode === 'static' || await model.getAttribute('data-mode') === 'parameter' || ['quantity', 'quantity-solver', 'static'].includes(await model.getAttribute('data-model-kind'))) {
               const evidence = await quantitySolver(model, replay, {parameter: selectors.staticParameter, result: selectors.staticResult, observe: async () => (await pixels()).hash, scenarios: await casesFor(model)});
               check(true, `Static parameter/result/replay ${m + 1} ${label}`, JSON.stringify(evidence));
               return;
@@ -198,6 +198,12 @@ export async function runPhysicsQA(opt) {
             const {value, unit} = splitAnswer(answer);
             const visibleAnswer = splitAnswer((await answerNode.innerText()).replace(/^Answer:\s*/i, ''));
             require(visibleAnswer.value === value && visibleAnswer.unit === unit, 'Worked answer attribute disagrees with visible answer');
+            // The final digit of a bare number must not be parsed as unit '1'.
+            await page.reload({waitUntil: 'networkidle'});
+            const unitless = `${value}1`;
+            await input.fill(unitless); await ex.locator(selectors.check).first().click();
+            require(['wrong', 'shown'].includes(await ex.getAttribute('data-state')), 'A unitless numeric answer was accepted');
+            check(true, `Unitless numeric rejected ${e + 1} ${label}`, unitless);
             // A dimensionally valid wrong value must fail, independently of syntax rejection.
             await page.reload({waitUntil: 'networkidle'});
             require(await problem() === initial, 'Seed did not reproduce the same problem');

@@ -101,6 +101,9 @@ export async function quantitySolver(root, replay, {parameter = '[data-quantity-
   };
   for(const given of scenarios) {
     await setScenario(given);
+    let applied=true;
+    for(const [name,value] of Object.entries(given))if(Number(await inputs.nth(scenarioNames.indexOf(name)).inputValue())!==value)applied=false;
+    if(!applied){await restore();continue;}
     const after=(await output.innerText()).trim();
     if(after!==before) {
       splitAnswer(answerText(after));
