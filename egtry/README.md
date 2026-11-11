@@ -361,3 +361,9 @@ from the recorded tool version. The CLI path is `LMVIDEO_BIN` or the tool repo's
 `build/lmvideo`. The host, compiler version, clean tool commit and scenario hash
 must match. The fixture video regression requires local `ffmpeg` and Chrome;
 its generated video is synthetic QA test input, never physical evidence.
+
+The R43 acceptance request explicitly requires a plotted basic-model reference.
+The shared `analyticComparison` contract retains scientific worked text, which
+is audited separately. A real widget with analytic text and no tested basic
+plot fails the full suite's **Basic model overlay** check. This prevents the
+analytic-only authoring fallback from silently waiving the requested criterion.
