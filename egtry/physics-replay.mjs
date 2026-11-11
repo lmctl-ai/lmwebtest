@@ -17,6 +17,7 @@ export async function contained(root,name){require(typeof name==='string'&&!path
 export function finiteTree(value,label='value'){if(typeof value==='number')require(Number.isFinite(value),'Nonfinite '+label);else if(value&&typeof value==='object')for(const [k,v] of Object.entries(value))finiteTree(v,label+'.'+k);}
 export function decimationIndices(count,maximum=161){require(Number.isInteger(count)&&count>=2,'Raw output needs at least two samples');require(Number.isInteger(maximum)&&maximum>=2&&maximum<=512,'maxSamples must be 2..512');const n=Math.min(count,maximum);return Array.from({length:n},(_,i)=>Math.floor(i*(count-1)/(n-1)+.5));}
 export async function verifyRecordedRuns(data,recipe,options={}){
+ if(data?.workflow?.kind==='wp01-lmscript-host'){const {verifyWP01Host}=await import('./physics-wp01-host.mjs');return verifyWP01Host(data,recipe,options);}
  if(data?.tool?.name==='lmvideo'&&data.workflow?.kind==='lmvideo-lmscript-host')return verifyHostRuns(data,recipe,options);
  if(data?.tool?.name==='lmvideo'){if(data.tool.version?.startsWith('lmvideo ')){const {verifyScriptRuns}=await import('./physics-lmvideo-script.mjs');return verifyScriptRuns(data,options);}return verifyRigidRuns(data,recipe,options);}
  const {root,toolRepo=path.join(os.homedir(),'repos/lmctlhq/physim'),binary=process.env.PHYSIM_BIN??path.join(toolRepo,'target/release/physim')}=options;
@@ -44,7 +45,7 @@ export async function verifyRecordedRuns(data,recipe,options={}){
  return {status:'PASS',scope:'Independent tool replay and declared physical-check verification; human scientific review still required',tool:data.tool,scenario:data.scenario,runs,comparedValues:compared};
 }
 export async function discoverRecipe(data,root){
- if(data.tool?.name==='lmvideo'&&data.workflow?.kind==='lmvideo-lmscript-host'){const file=await contained(root,data.recipe?.file);same(digest(await fs.readFile(file)),data.recipe.sha256,'Host recipe hash');return JSON.parse(await fs.readFile(file,'utf8'));}
+ if(data.tool?.name==='lmvideo'&&['lmvideo-lmscript-host','wp01-lmscript-host'].includes(data.workflow?.kind)){const file=await contained(root,data.recipe?.file);same(digest(await fs.readFile(file)),data.recipe.sha256,'Host recipe hash');return JSON.parse(await fs.readFile(file,'utf8'));}
  if(data.tool?.name==='lmvideo'&&data.tool.version?.startsWith('lmvideo '))return {adapter:'upstream-lmvideo-script'};
  if(data.tool?.name==='lmvideo'){const file=await contained(root,data.scenario.file);same(digest(await fs.readFile(file)),data.scenario.sha256,'Rigid scenario hash');return JSON.parse(await fs.readFile(file,'utf8'));}
  if(data.recipe?.file){const file=await contained(root,data.recipe.file);same(digest(await fs.readFile(file)),data.recipe.sha256,'Recipe SHA256');return JSON.parse(await fs.readFile(file,'utf8'));}

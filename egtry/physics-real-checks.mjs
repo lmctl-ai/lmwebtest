@@ -16,6 +16,21 @@ export function referenceRows(run,basic,state){
  const axis=run.axis??{key:'t',kind:'time',unit:'s'};
  return run.samples.map(s=>({...(axis.kind==='static'?{}:{[axis.key]:s[axis.key]}),...state(basic,axis.kind==='static'?0:s[axis.key])}));
 }
+// A basic approximation may stop before impact or cover only some displayed quantities.
+export function referenceGeometry(view,run,baseline){
+ const x=view.x??'t',y=view.y,valid=s=>Number.isFinite(s[x])&&Number.isFinite(s[y]);
+ const reference=!['rigid','field'].includes(view.kind)&&baseline.some(valid);
+ if(!reference){if(view.compare){const all=[...run.samples,...run.samples.map(s=>({...s,[y]:s[view.compare]}))];return{view:{...view,bounds:{xmin:Math.min(...all.map(s=>s[x])),xmax:Math.max(...all.map(s=>s[x])),ymin:Math.min(...all.map(s=>s[y])),ymax:Math.max(...all.map(s=>s[y]))}},reference:false};}return {view:{...view},reference:false};}
+ const all=[...run.samples,...baseline].filter(valid);
+ return {view:{...view,bounds:{xmin:Math.min(...all.map(s=>s[x])),xmax:Math.max(...all.map(s=>s[x])),ymin:Math.min(...all.map(s=>s[y])),ymax:Math.max(...all.map(s=>s[y]))}},reference:true};
+}
+export function recordedSeekReached(run,index,attributes){
+ const axis=run.axis??{key:'t',kind:'time',unit:'s'},last=run.samples.length-1;
+ if(Number(index)!==last)return false;
+ if(axis.kind==='static')return true;
+ const value=attributes[axis.kind==='time'?'data-time':'data-coordinate'];
+ return value!==null&&value!==undefined&&value!==''&&Number(value)===run.samples[last][axis.key];
+}
 export async function installRealCanvasProbe(page){await page.addInitScript(()=>{
  const proto=CanvasRenderingContext2D.prototype,fill=proto.fillRect,text=proto.fillText;
  proto.fillRect=function(x,y,w,h){if(x===0&&y===0&&w>=this.canvas.width&&h>=this.canvas.height)this.canvas.__physicsQaLabels=[];return fill.apply(this,arguments);};
@@ -43,10 +58,10 @@ async function assertPlot(canvas,view,samples,index,columns,geometry){
    let tested=0;for(let i=0;i<s.poses.length;i++){const p=s.poses[i],b=geometry?.[i]??{shape:'sphere',radius:.2},scratch=document.createElement('canvas').getContext('2d');scratch.fillStyle=b.color??(i?'#b76638':'#668179');scratch.fillRect(0,0,1,1);const rgb=Array.from(scratch.getImageData(0,0,1,1).data).slice(0,3),x=el.width/2+p[0]*Math.min(32,el.width/12),y=el.height-35-p[1]*Math.min(32,el.width/12);if(x>4&&x<el.width-4&&y>35&&y<el.height-20){if(!near(x,y,[rgb]))return {error:'Rigid pose is not rendered at its recorded location',body:i};tested++;}}
    return tested?{kind:view.kind,tested,labels}:{error:'No rigid body is visible inside the viewport'};
   }
-  const xkey=view.x??'t',ykey=view.y,xs=samples.map(s=>s[xkey]),ys=samples.map(s=>s[ykey]);if(!xs.every(Number.isFinite)||!ys.every(Number.isFinite))return {error:'Plot channels are not finite'};
+  const xkey=view.x??'t',ykey=view.y,points=samples.filter(s=>Number.isFinite(s[xkey])&&Number.isFinite(s[ykey])),xs=points.map(s=>s[xkey]),ys=points.map(s=>s[ykey]);if(!points.length||(!view.reference&&points.length!==samples.length))return {error:'Plot channels are not finite'};
   const xmin=view.bounds?.xmin??Math.min(...xs),xmax=view.bounds?.xmax??Math.max(...xs),ymin=view.bounds?.ymin??Math.min(...ys),ymax=view.bounds?.ymax??Math.max(...ys),px=x=>60+(x-xmin)/(xmax-xmin||1)*(el.width-70),py=y=>245-(y-ymin)/(ymax-ymin||1)*190;
-  if(!near(px(s[xkey]),py(s[ykey]),[[177,91,34]]))return {error:'Current recorded point is not plotted at its data coordinates'};
-  let tested=0;for(let i=0;i<samples.length;i+=Math.max(1,Math.floor(samples.length/16))){if(!near(px(xs[i]),py(ys[i]),[[33,104,149],[177,91,34]]))return {error:'Recorded curve does not pass through its saved sample',sample:i};tested++;}
+  if((Number.isFinite(s[xkey])&&Number.isFinite(s[ykey])||!view.reference)&&!near(px(s[xkey]),py(s[ykey]),[[177,91,34]]))return {error:'Current recorded point is not plotted at its data coordinates'};
+  let tested=0;for(let i=0;i<points.length;i+=Math.max(1,Math.floor(points.length/16))){if(!near(px(xs[i]),py(ys[i]),[[33,104,149],[177,91,34]]))return {error:'Recorded curve does not pass through its saved sample',sample:i};tested++;}
   for(const [k,lo,hi] of [[xkey,xmin,xmax],[ykey,ymin,ymax]])if(!labels.some(text=>text.includes(`${k} (${columns[k].unit})`)&&text.includes(fmt(lo))&&text.includes(fmt(hi))))return {error:'Plotted axis labels disagree with saved quantities/units',channel:k,labels};
   return {kind:view.kind,tested,labels};
  },{view,samples,index,columns,geometry});require(!evidence.error,JSON.stringify(evidence));return {...pixels,...evidence};
@@ -69,10 +84,17 @@ export async function checkRealThing(model,{page,request,book,root,toolRepo,bina
    const meta=await video.evaluate(v=>({width:v.videoWidth,height:v.videoHeight,duration:v.duration}));require(meta.width>0&&meta.height>0&&Math.abs(meta.duration-run.media.playbackDurationS)<.1,'Decoded clip disagrees with replay duration');
   }
   const comparison=comparisonContract(config,!!(run.basic??data.basic));const baseline=comparison==='overlay'?referenceRows(run,run.basic??data.basic,basicModule.basicState):[];
-  const axis=run.axis??{key:'t',kind:'time',unit:'s'},last=run.samples.length-1;await seek.press('End');require(Number(await seek.inputValue())===last&&(axis.kind==='static'||Number(await model.getAttribute('data-time'))===run.samples[last][axis.key]),'Seek did not reach the recorded time');
+  const axis=run.axis??{key:'t',kind:'time',unit:'s'},last=run.samples.length-1;await seek.press('End');require(recordedSeekReached(run,await seek.inputValue(),{'data-time':await model.getAttribute('data-time'),'data-coordinate':await model.getAttribute('data-coordinate')}),'Seek did not reach the recorded coordinate');
   const text=await measurement.innerText();for(const [key,meta]of Object.entries(run.columns))require(text.includes(`${key} = ${fmt(run.samples[last][key])} ${meta.unit}`),'Readout differs from saved sample: '+key);
   const signature=canonical(run.samples.map(({t,...values})=>values));if(signatures.length&&signature!==signatures[0])varied=true;signatures.push(signature);
-  const plots=[];let comparisons=0;const expectedView=v=>{const view={...v};if(baseline.length&&!['rigid','field'].includes(view.kind)){const all=[...run.samples,...baseline],x=view.x??'t',y=view.y;view.bounds={xmin:Math.min(...all.map(s=>s[x])),xmax:Math.max(...all.map(s=>s[x])),ymin:Math.min(...all.map(s=>s[y])),ymax:Math.max(...all.map(s=>s[y]))};}return view;};for(let vi=0;vi<config.views.length;vi++){await viewSelect.selectOption(String(vi));const view=expectedView(config.views[vi]),recorded=await assertPlot(canvases.nth(0),view,run.samples,last,run.columns,run.bodies??run.field);let basic;if(baseline.length&&view.kind!=='rigid'){basic=await assertPlot(canvases.nth(1),view,baseline,last,run.columns,run.field);comparisons++;}plots.push({recorded,basic});}if(comparison==='overlay')require(comparisons>0,'Missing visible basic-model comparison view');else require(await canvases.nth(1).isHidden(),'An analytic-only comparison must not show an unverified baseline canvas');
+  const plots=[];let comparisons=0;const expectedView=v=>referenceGeometry(v,run,baseline).view;
+  for(let vi=0;vi<config.views.length;vi++){
+   await viewSelect.selectOption(String(vi));const geometry=referenceGeometry(config.views[vi],run,baseline),view=geometry.view,recorded=await assertPlot(canvases.nth(0),view,run.samples,last,run.columns,run.bodies??run.field);let basic;
+   if(geometry.reference){basic=await assertPlot(canvases.nth(1),{...view,reference:true},baseline,last,run.columns,run.field);comparisons++;}
+   else require(await canvases.nth(1).isHidden(),'A view without a comparable basic quantity must hide its baseline');
+   plots.push({recorded,basic});
+  }
+  if(comparison==='overlay')require(comparisons>0,'Missing visible basic-model comparison view');else require(await canvases.nth(1).isHidden(),'An analytic-only comparison must not show an unverified baseline canvas');
   await viewSelect.selectOption('0');await model.locator('[data-action=reset]').click();
   if(axis.kind==='time'&&run.samples.length>1){const play=model.locator('[data-action=play]');await play.click();await page.waitForFunction(([el,t])=>Number(el.dataset.time)>t||el.dataset.playing==='false',[await model.elementHandle(),run.samples[0].t],{timeout:4000});require(Number(await model.getAttribute('data-time'))>run.samples[0].t,'Play never advances stored data; adjust the replay time scale');if(await model.getAttribute('data-playing')==='true')await play.click();const currentIndex=Number(await seek.inputValue());await assertPlot(canvases.first(),expectedView(config.views[0]),run.samples,currentIndex,run.columns,run.bodies??run.field);const before=await canvasPixels(canvases.first());await page.waitForTimeout(150);require((await canvasPixels(canvases.first())).hash===before.hash,'Paused recorded data keeps animating');await seek.press('Home');await model.locator('[data-action=step]').first().click();require(Number(await seek.inputValue())===1,'Step does not advance exactly one stored sample');}
   const steps=await replay(model);if(comparison==='analytic')checkAnalyticSteps(config,steps);require(steps.length>=3,'Missing worked basic/real comparison');runEvidence.push({label:run.label,comparison,analyticComparison:comparison==='analytic'?config.analyticComparison:undefined,plots,steps,axis,seek:true,playPauseStep:axis.kind==='time'&&run.samples.length>1});
