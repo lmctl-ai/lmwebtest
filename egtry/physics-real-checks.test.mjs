@@ -46,3 +46,23 @@ test('field pixels and oriented rigid bodies are checked against saved values',a
   }
  }finally{await browser.close();}
 });
+
+test('native comparison pixels follow their recorded source column at both widths',async()=>{
+ const {assertPlot}=await import('./physics-real-checks.mjs'),browser=await chromium.launch();
+ try{
+  for(const width of [1280,390]){
+   const page=await browser.newPage({viewport:{width,height:900}});await installRealCanvasProbe(page);
+   await page.goto('data:text/html,'+encodeURIComponent('<canvas width="800" height="300" style="width:100%;max-width:800px"></canvas>'));
+   const canvas=page.locator('canvas'),samples=[{t:0,x:1,truth:-1},{t:1,x:2,truth:-.5},{t:2,x:3,truth:0}],view={kind:'series',x:'t',y:'x',compare:'truth',bounds:{xmin:0,xmax:2,ymin:-1,ymax:3}},columns={t:{unit:'s'},x:{unit:'m'},truth:{unit:'m'}};
+   const draw=async shift=>canvas.evaluate((el,{samples,shift})=>{
+    const c=el.getContext('2d'),px=t=>60+t/2*730,py=v=>245-(v+1)/4*190;
+    c.fillStyle='#eef4f1';c.fillRect(0,0,800,300);c.fillStyle='#213c36';c.fillText('t (s): 0 … 2',60,285);c.fillText('x (m): -1 … 3',60,43);
+    for(const [key,color,offset]of[['truth','#7b4c9a',shift],['x','#216895',0]]){c.lineWidth=2;c.strokeStyle=color;c.beginPath();samples.forEach((s,i)=>i?c.lineTo(px(s.t),py(s[key]+offset)):c.moveTo(px(s.t),py(s[key]+offset)));c.stroke();}
+    c.fillStyle='#b15b22';c.beginPath();c.arc(px(2),py(3),6,0,Math.PI*2);c.fill();
+   },{samples,shift});
+   await draw(0);assert.equal((await assertPlot(canvas,view,samples,2,columns)).tested,3);
+   await draw(.5);await assert.rejects(assertPlot(canvas,view,samples,2,columns),/Recorded comparison curve/);
+   await page.close();
+  }
+ }finally{await browser.close();}
+});
