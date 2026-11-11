@@ -187,7 +187,8 @@ export async function runPhysicsQA(opt) {
             check(true, `Canvas nonblank ${m + 1} ${label}`, JSON.stringify(before));
             if(await model.getAttribute('data-real-thing')!==null){realWidgetCount++;
               const evidence=await checkRealThing(model,{page,request:context.request,book:opt.book,root:opt['content-root'],toolRepo:opt['physim-repo'],binary:opt['physim-bin'],lmvideoRepo:opt['lmvideo-repo'],lmvideoBinary:opt['lmvideo-bin'],replay:scope=>workedReplay(scope,{minimumSteps:3}),cache:realCache});
-              check(true,`Real provenance/replay/widget ${m+1} ${label}`,JSON.stringify(evidence));return;
+              check(true,`Real provenance/replay/widget ${m+1} ${label}`,JSON.stringify(evidence));
+              check(evidence.runs.every(r=>r.plots.some(v=>v.basic?.tested>0)),`Basic model overlay ${m+1} ${label}`,'R43 requires a plotted basic-model reference; analytic text is separate evidence');return;
             }
             const mode = await model.getAttribute('data-model-mode');
             if (mode === 'static' || await model.getAttribute('data-mode') === 'parameter' || ['quantity', 'quantity-solver', 'static'].includes(await model.getAttribute('data-model-kind'))) {
