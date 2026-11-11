@@ -18,7 +18,7 @@ export function finiteTree(value,label='value'){if(typeof value==='number')requi
 export function decimationIndices(count,maximum=161){require(Number.isInteger(count)&&count>=2,'Raw output needs at least two samples');require(Number.isInteger(maximum)&&maximum>=2&&maximum<=512,'maxSamples must be 2..512');const n=Math.min(count,maximum);return Array.from({length:n},(_,i)=>Math.floor(i*(count-1)/(n-1)+.5));}
 export async function verifyRecordedRuns(data,recipe,options={}){
  if(data?.tool?.name==='lmvideo'&&data.workflow?.kind==='lmvideo-lmscript-host')return verifyHostRuns(data,recipe,options);
- if(data?.tool?.name==='lmvideo')return verifyRigidRuns(data,recipe,options);
+ if(data?.tool?.name==='lmvideo'){if(data.tool.version?.startsWith('lmvideo ')){const {verifyScriptRuns}=await import('./physics-lmvideo-script.mjs');return verifyScriptRuns(data,options);}return verifyRigidRuns(data,recipe,options);}
  const {root,toolRepo=path.join(os.homedir(),'repos/lmctlhq/physim'),binary=process.env.PHYSIM_BIN??path.join(toolRepo,'target/release/physim')}=options;
  require(root,'Supply reviewed content repository root');require(data?.schema==='egtry-real-runs/1','Unknown real-run schema');require(data.tool?.name==='physim','No replay adapter for '+data.tool?.name+'; cannot claim verified data');
  require(/^[a-z][a-z0-9-]+$/.test(recipe.operation??''),'Invalid physim operation');same(data.scenario?.operation,recipe.operation,'Operation');same(data.scenario?.file,recipe.scenario,'Scenario file');
@@ -45,6 +45,7 @@ export async function verifyRecordedRuns(data,recipe,options={}){
 }
 export async function discoverRecipe(data,root){
  if(data.tool?.name==='lmvideo'&&data.workflow?.kind==='lmvideo-lmscript-host'){const file=await contained(root,data.recipe?.file);same(digest(await fs.readFile(file)),data.recipe.sha256,'Host recipe hash');return JSON.parse(await fs.readFile(file,'utf8'));}
+ if(data.tool?.name==='lmvideo'&&data.tool.version?.startsWith('lmvideo '))return {adapter:'upstream-lmvideo-script'};
  if(data.tool?.name==='lmvideo'){const file=await contained(root,data.scenario.file);same(digest(await fs.readFile(file)),data.scenario.sha256,'Rigid scenario hash');return JSON.parse(await fs.readFile(file,'utf8'));}
  if(data.recipe?.file){const file=await contained(root,data.recipe.file);same(digest(await fs.readFile(file)),data.recipe.sha256,'Recipe SHA256');return JSON.parse(await fs.readFile(file,'utf8'));}
  const candidates=[];async function walk(dir){let entries;try{entries=await fs.readdir(dir,{withFileTypes:true});}catch{return;}for(const e of entries){const p=path.join(dir,e.name);if(e.isDirectory())await walk(p);else if(e.name.endsWith('.json')){try{const r=JSON.parse(await fs.readFile(p,'utf8'));if(r.operation===data.scenario.operation&&r.scenario===data.scenario.file&&r.runs?.length===data.runs.length&&r.runs.every((v,i)=>canonical(v.overrides??{})===canonical(data.runs[i].parameters)))candidates.push(r);}catch{}}}}
@@ -69,7 +70,7 @@ export async function verifyMutationRejected(data,recipe,options){
  const sample=data.runs?.[0]?.samples?.[0];require(sample,'No stored data to mutation-test');const axis=data.runs[0].axis?.key??'t',paths=[];
  const scalar=Object.keys(sample).find(k=>k!==axis&&typeof sample[k]==='number');if(scalar)paths.push([scalar]);if(sample.field?.length)paths.push(['field',0]);if(sample.poses?.[0]?.length)paths.push(['poses',0,0]);require(paths.length,'No physical numeric value to mutation-test');const caught=[];
  for(const keys of paths){const changed=structuredClone(data);let target=changed.runs[0].samples[0];for(const k of keys.slice(0,-1))target=target[k];const key=keys.at(-1),before=target[key];target[key]=before===0?1:before*.5;require(target[key]!==before,'Mutation did not change a value');changed.runs[0].samplesSha256=digest(JSON.stringify(changed.runs[0].samples));let error;
-  try{await verifyRecordedRuns(changed,recipe,options);}catch(e){error=e.message;}require(error&&/^Published (?:numeric samples|rigid poses and values) differs/.test(error),'Numeric mutation was accepted or only metadata was checked: '+(error??'ACCEPTED'));caught.push({path:'runs[0].samples[0].'+keys.join('.'),before,after:target[key],updatedSampleChecksum:true,rejected:error});
+  try{await verifyRecordedRuns(changed,recipe,options);}catch(e){error=e.message;}require(error&&/^Published (?:numeric samples|rigid poses and values|rigid clip numeric samples) differs/.test(error),'Numeric mutation was accepted or only metadata was checked: '+(error??'ACCEPTED'));caught.push({path:'runs[0].samples[0].'+keys.join('.'),before,after:target[key],updatedSampleChecksum:true,rejected:error});
  }return caught;
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
