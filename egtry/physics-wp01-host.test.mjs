@@ -1,0 +1,3 @@
+import{test}from'node:test';import assert from'node:assert/strict';import{sampling}from'./physics-wp01-host.mjs';
+const p={kind:'PhysicsTake',bakeFrames:361,bakeStride:1,fixedDtS:.008333333,bodyCount:3,massPerDynamicBodyKg:1,defaultLinearDampingPerS:.05,defaultAngularDampingPerS:.05};
+test('Native host accepts audited variable bake grids and refuses invalid sampling, mass or concealed damping',()=>{sampling(p);sampling({...p,kind:'Presentation',bakeFrames:180,bakeStride:2,bodyCount:36});for(const change of[{bakeFrames:1},{bakeFrames:513},{bakeStride:0},{fixedDtS:1/60},{bodyCount:0},{massPerDynamicBodyKg:0},{defaultLinearDampingPerS:0},{defaultAngularDampingPerS:0},{kind:'fabricated'}])assert.throws(()=>sampling({...p,...change}));});

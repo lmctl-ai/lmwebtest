@@ -13,3 +13,5 @@ test('unmapped quantities and rigid geometry do not demand a fictitious basic cu
  assert.equal(referenceGeometry({kind:'rigid'},run,baseline).reference,false);
  assert.equal(referenceGeometry({kind:'series',x:'t',y:'energy'},run,baseline).reference,true);
 });
+
+test('declared same-coordinate reference columns share exact plot bounds without claiming a baseline canvas',()=>{const run={samples:[{t:0,x:3,ref:10},{t:1,x:5,ref:-2}]};const g=referenceGeometry({kind:'series',x:'t',y:'x',compare:'ref'},run,[]);assert.equal(g.reference,false);assert.deepEqual(g.view.bounds,{xmin:0,xmax:1,ymin:-2,ymax:10});});
