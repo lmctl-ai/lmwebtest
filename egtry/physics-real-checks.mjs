@@ -26,6 +26,9 @@ export async function realAssetBudget(root,book){
  async function walk(at){for(const e of await fs.readdir(at,{withFileTypes:true})){const file=path.join(at,e.name);require(!e.isSymbolicLink(),'Real assets must not escape through symlinks');if(e.isDirectory())await walk(file);else{require(e.isFile(),'Non-file real asset');bytes+=(await fs.stat(file)).size;files++;}}}
  await walk(dir);require(bytes<=1500000,`Real assets exceed 1,500,000-byte book budget: ${bytes}`);return {bytes,files,limit:1500000};
 }
+export async function recordedCoordinate(model,axis){
+ if(axis.kind==='static')return null;const coordinate=await model.getAttribute(axis.kind==='time'?'data-time':'data-coordinate'),legacy=coordinate??await model.getAttribute('data-time');require(typeof legacy==='string'&&legacy.trim()&&Number.isFinite(Number(legacy)),'Missing recorded sampling coordinate');return Number(legacy);
+}
 export function recordedView(view,samples,basic=[]){
  const result={...view};if(['rigid','field'].includes(view.kind))return result;
  const compare=view.compare?samples.map(s=>({...s,[view.y]:s[view.compare]})):basic;
@@ -75,7 +78,8 @@ export async function checkRealThing(model,{page,request,book,root,toolRepo,bina
    const meta=await video.evaluate(v=>({width:v.videoWidth,height:v.videoHeight,duration:v.duration}));require(meta.width>0&&meta.height>0&&Math.abs(meta.duration-run.media.playbackDurationS)<.1,'Decoded clip disagrees with replay duration');
   }
   const comparison=comparisonContract(config,!!(run.basic??data.basic));const baseline=comparison==='overlay'?referenceRows(run,run.basic??data.basic,basicModule.basicState):[];
-  const axis=run.axis??{key:'t',kind:'time',unit:'s'},last=run.samples.length-1;await seek.press('End');require(Number(await seek.inputValue())===last&&(axis.kind==='static'||Number(await model.getAttribute('data-time'))===run.samples[last][axis.key]),'Seek did not reach the recorded time');
+  const axis=run.axis??{key:'t',kind:'time',unit:'s'},last=run.samples.length-1;await seek.press('End');require(Number(await seek.inputValue())===last&&(axis.kind==='static'||await recordedCoordinate(model,axis)===run.samples[last][axis.key]),'Seek did not reach the recorded time');
+  if(axis.kind!=='time')require(await model.locator('[data-action=play]').isHidden(),'A non-time scan must not expose physical-time Play');
   const text=await measurement.innerText();for(const [key,meta]of Object.entries(run.columns))require(text.includes(`${key} = ${fmt(run.samples[last][key])} ${meta.unit}`),'Readout differs from saved sample: '+key);
   const signature=canonical(run.samples.map(({t,...values})=>values));if(signatures.length&&signature!==signatures[0])varied=true;signatures.push(signature);
   const plots=[];let comparisons=0;const expectedView=v=>recordedView(v,run.samples,baseline);for(let vi=0;vi<config.views.length;vi++){await viewSelect.selectOption(String(vi));const view=expectedView(config.views[vi]),recorded=await assertPlot(canvases.nth(0),view,run.samples,last,run.columns,run.bodies??run.field);let basic;if(baseline.length&&view.kind!=='rigid'){basic=await assertPlot(canvases.nth(1),view,baseline,last,run.columns,run.field);comparisons++;}plots.push({recorded,basic});}if(comparison==='overlay')require(comparisons>0,'Missing visible basic-model comparison view');else require(await canvases.nth(1).isHidden(),'An analytic-only comparison must not show an unverified baseline canvas');
