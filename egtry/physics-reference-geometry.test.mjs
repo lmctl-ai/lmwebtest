@@ -15,3 +15,5 @@ test('unmapped quantities and rigid geometry do not demand a fictitious basic cu
 });
 
 test('declared same-coordinate reference columns share exact plot bounds without claiming a baseline canvas',()=>{const run={samples:[{t:0,x:3,ref:10},{t:1,x:5,ref:-2}]};const g=referenceGeometry({kind:'series',x:'t',y:'x',compare:'ref'},run,[]);assert.equal(g.reference,false);assert.deepEqual(g.view.bounds,{xmin:0,xmax:1,ymin:-2,ymax:10});});
+
+test('reference geometry retains explicit physical limits for a vanishing projection',()=>{const view={kind:'series',x:'t',y:'mean',bounds:{ymin:-.001,ymax:.001}},run={samples:[{t:0,mean:2e-19},{t:1,mean:-2e-19}]},basic=[{t:0,mean:0},{t:1,mean:0}];const result=referenceGeometry(view,run,basic);assert.equal(result.reference,true);assert.deepEqual(result.view.bounds,{xmin:0,xmax:1,ymin:-.001,ymax:.001});});
