@@ -89,7 +89,7 @@ export async function verifyHostRuns(data,recipe,{root,toolRepo=path.join(os.hom
  require(recipe.runs?.length===data.runs.length&&data.runs.length>0,'Host grid differs');let compared=0;const evidence=[];
  for(let i=0;i<data.runs.length;i++){
   const r=data.runs[i],v=recipe.runs[i],source=await contained(root,v.script),script=await fs.readFile(source,'utf8'),input={scenarioFile:recipe.scenario,scenarioSha256:digest(script),script,parameters:v.parameters};finiteTree(r);
-  same(r.input,input,'Host resolved input');same(r.parameters,v.parameters,'Host parameters');same(r.label,v.label,'Host label');same(r.inputSha256,digest(JSON.stringify(input,null,2)+'\n'),'Host input hash');
+  same(r.input,input,'Host resolved input');same(r.parameters,v.parameters,'Host parameters');same(r.label,v.label,'Host label');same(r.basic??null,v.basic??recipe.basic??null,'Host basic model');same(r.inputSha256,digest(JSON.stringify(input,null,2)+'\n'),'Host input hash');
   require(v.parameters.bakeFrames===180&&v.parameters.bakeStride===1&&v.parameters.fixedDtS===.008333333,'Unreviewed host sampling contract');
   const cacheKey=data.tool.binarySha256+':host:'+r.inputSha256;let output=rawCache.get(cacheKey);
   if(!output){const dir=await fs.mkdtemp(path.join(os.tmpdir(),'lmvideo-host-qa-'));try{const file=path.join(dir,'scenario.lms');await fs.writeFile(file,script);const result=await exec('lmscript',[file],{cwd:dir,env:{...process.env,PATH:path.dirname(binary)+path.delimiter+process.env.PATH},timeout:120000,maxBuffer:64*1024*1024});output={stdout:result.stdout,clip:await fs.readFile(path.join(dir,v.clipOutput)),poster:await fs.readFile(path.join(dir,v.posterOutput))};rawCache.set(cacheKey,output);}finally{await fs.rm(dir,{recursive:true,force:true});}}
