@@ -60,3 +60,13 @@ test('native stack replay binds its basic energy budget to the resolved run bodi
  await assert.rejects(verifyRecordedRuns(changed,recipe,options),/Rigid basic model/);
  const mutations=await verifyMutationRejected(data,recipe,options);assert.ok(mutations.some(m=>m.path.endsWith('poses.0.0')));
 });
+
+test('native channel provenance labels are replayed exactly rather than discarded',async()=>{
+ const f=await makeReplayFixture();try{
+  f.recipe.columns.x.origin='native simulation';f.recipe.columns.x.label='Recorded position';
+  for(const r of f.data.runs)Object.assign(r.columns.x,{origin:'native simulation',label:'Recorded position'});
+  const options={root:f.root,toolRepo:f.toolRepo,binary:f.binary};assert.equal((await verifyRecordedRuns(f.data,f.recipe,options)).status,'PASS');
+  const wrong=structuredClone(f.data);wrong.runs[0].columns.x.origin='analytic reference';await assert.rejects(verifyRecordedRuns(wrong,f.recipe,options),/channel units/);
+  wrong.runs[0].columns.x.origin='native simulation';wrong.runs[0].columns.x.label='Invented interpretation';await assert.rejects(verifyRecordedRuns(wrong,f.recipe,options),/channel units/);
+ }finally{await f.dispose();}
+});

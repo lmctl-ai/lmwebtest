@@ -6,6 +6,16 @@ import {canvasPixels,perceptible} from './physics-checks.mjs';
 const require=(ok,message)=>{if(!ok)throw Error(message);};
 const equal=(a,b,message)=>require(canonical(a)===canonical(b),message);
 const fmt=n=>Number(n.toPrecision(10)).toString();
+export function visibleProvenance(data,run,shown){
+ const expected={scenario:data.scenario,tool:data.tool,parameters:run.input,media:run.media,parameterUnits:run.inputUnits,workflow:data.workflow,validation:run.checks,decimation:run.decimation};
+ if(run.basicNormalization||Object.hasOwn(shown,'basicModel'))expected.basicModel=run.basic??data.basic;
+ if(run.basicNormalization)expected.basicNormalization=run.basicNormalization;
+ return expected;
+}
+export function referenceRows(run,basic,state){
+ const axis=run.axis??{key:'t',kind:'time',unit:'s'};
+ return run.samples.map(s=>({...(axis.kind==='static'?{}:{[axis.key]:s[axis.key]}),...state(basic,axis.kind==='static'?0:s[axis.key])}));
+}
 export async function installRealCanvasProbe(page){await page.addInitScript(()=>{
  const proto=CanvasRenderingContext2D.prototype,fill=proto.fillRect,text=proto.fillText;
  proto.fillRect=function(x,y,w,h){if(x===0&&y===0&&w>=this.canvas.width&&h>=this.canvas.height)this.canvas.__physicsQaLabels=[];return fill.apply(this,arguments);};
@@ -51,14 +61,14 @@ export async function checkRealThing(model,{page,request,book,root,toolRepo,bina
  if(await footer.getAttribute('open')===null)await footer.locator('summary').click();require(await perceptible(footer.locator('pre')),'Provenance footer is hidden');require(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Opened provenance footer causes horizontal overflow');
  const basicModule=await import(pathToFileURL(path.join(root,'web/physics/real/basic.js')).href);let varied=false;const signatures=[],runEvidence=[];
  for(let ri=0;ri<data.runs.length;ri++){
-  await select.selectOption(String(ri));const run=data.runs[ri];equal(JSON.parse(await footer.locator('pre').innerText()),{scenario:data.scenario,tool:data.tool,parameters:run.input,media:run.media,parameterUnits:run.inputUnits,workflow:data.workflow,validation:run.checks,decimation:run.decimation},'Visible provenance differs from recorded asset');
+  await select.selectOption(String(ri));const run=data.runs[ri];const shown=JSON.parse(await footer.locator('pre').innerText());equal(shown,visibleProvenance(data,run,shown),'Visible provenance differs from recorded asset');
   if(run.media){
    const video=model.getByLabel('Recorded lmvideo clip',{exact:true});require(await perceptible(video),'Recorded clip is hidden');
    const mediaBase=new URL('../',url);require(await video.getAttribute('src')===new URL(run.media.clip,mediaBase).href,'Clip selector does not match recorded run');require(await video.getAttribute('poster')===new URL(run.media.poster,mediaBase).href,'Poster selector does not match recorded run');
    await video.evaluate(v=>new Promise((resolve,reject)=>{if(v.readyState>=2)return resolve();v.addEventListener('loadeddata',resolve,{once:true});v.addEventListener('error',()=>reject(Error('Recorded clip failed to decode')),{once:true});v.load();}));
    const meta=await video.evaluate(v=>({width:v.videoWidth,height:v.videoHeight,duration:v.duration}));require(meta.width>0&&meta.height>0&&Math.abs(meta.duration-run.media.playbackDurationS)<.1,'Decoded clip disagrees with replay duration');
   }
-  const comparison=comparisonContract(config,!!(run.basic??data.basic));const baseline=comparison==='overlay'?run.samples.map(s=>({t:s.t,...basicModule.basicState(run.basic??data.basic,s.t)})):[];
+  const comparison=comparisonContract(config,!!(run.basic??data.basic));const baseline=comparison==='overlay'?referenceRows(run,run.basic??data.basic,basicModule.basicState):[];
   const axis=run.axis??{key:'t',kind:'time',unit:'s'},last=run.samples.length-1;await seek.press('End');require(Number(await seek.inputValue())===last&&(axis.kind==='static'||Number(await model.getAttribute('data-time'))===run.samples[last][axis.key]),'Seek did not reach the recorded time');
   const text=await measurement.innerText();for(const [key,meta]of Object.entries(run.columns))require(text.includes(`${key} = ${fmt(run.samples[last][key])} ${meta.unit}`),'Readout differs from saved sample: '+key);
   const signature=canonical(run.samples.map(({t,...values})=>values));if(signatures.length&&signature!==signatures[0])varied=true;signatures.push(signature);
