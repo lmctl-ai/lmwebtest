@@ -87,7 +87,7 @@ export async function assertPlot(canvas,view,samples,index,columns,geometry){
   let tested=0;for(let i=0;i<points.length;i+=Math.max(1,Math.floor(points.length/16))){if(!near(px(xs[i]),py(ys[i]),[[33,104,149],[177,91,34]]))return {error:'Recorded curve does not pass through its saved sample',sample:i};tested++;}
   if(view.compare&&!view.reference){for(let i=0;i<samples.length;i+=Math.max(1,Math.floor(samples.length/16)))if(!near(px(xs[i]),py(samples[i][view.compare]),[[123,76,154],[177,91,34],[33,104,149]]))return {error:'Recorded comparison curve differs from its saved source column',sample:i,column:view.compare};}
   let overlay;
-  if(view.overlay){
+  if(view.overlay&&!view.reference){
    const curve=view.overlay.filter(p=>Number.isFinite(p[xkey])&&Number.isFinite(p[ykey])),real=samples.filter(p=>Number.isFinite(p[xkey])&&Number.isFinite(p[ykey]));let candidates=0,visible=0;
    for(let n=0;n<(curve.length===1?1:33)&&curve.length;n++){
     const offset=curve.length===1?0:n*(curve.length-1)/32,i=Math.floor(offset),u=offset-i,a=curve[i],b=curve[Math.min(i+1,curve.length-1)],x=px(a[xkey])*(1-u)+px(b[xkey])*u,y=py(a[ykey])*(1-u)+py(b[ykey])*u;
@@ -97,7 +97,7 @@ export async function assertPlot(canvas,view,samples,index,columns,geometry){
    if(candidates&&visible<Math.ceil(.8*candidates))return {error:'Basic-model dashed overlay is missing or differs from its reference curve',candidates,visible};overlay={candidates,visible,indistinguishable:candidates===0};
   }
   return {kind:view.kind,tested,labels,overlay,axisLabels:[[xkey,columns[xkey].unit,xmin,xmax],[ykey,columns[ykey].unit,ymin,ymax]]};
- },{view,samples,index,columns,geometry});require(!evidence.error,JSON.stringify(evidence));for(const [key,unit,lo,hi] of evidence.axisLabels??[])require(axisLabelMatches(evidence.labels,key,unit,lo,hi),JSON.stringify({error:'Plotted axis labels disagree with saved quantities/units',key,unit,lo,hi,labels:evidence.labels}));return {...pixels,...evidence};
+ },{view,samples,index,columns,geometry});require(!evidence.error,JSON.stringify({...evidence,view:view.label??view.y??view.kind,referenceOnly:!!view.reference}));for(const [key,unit,lo,hi] of evidence.axisLabels??[])require(axisLabelMatches(evidence.labels,key,unit,lo,hi),JSON.stringify({error:'Plotted axis labels disagree with saved quantities/units',key,unit,lo,hi,labels:evidence.labels}));return {...pixels,...evidence};
 }
 // Latch an actual pixel change while Play runs, including closed trajectories.
 export async function startPlaybackPixels(canvas){await canvas.evaluate(el=>{
