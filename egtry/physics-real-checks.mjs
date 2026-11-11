@@ -16,7 +16,7 @@ export function visibleProvenance(data,run,shown){
 }
 export function referenceRows(run,basic,state){
  const axis=run.axis??{key:'t',kind:'time',unit:'s'};
- return run.samples.map(s=>({...(axis.kind==='static'?{}:{[axis.key]:s[axis.key]}),...state(basic,axis.kind==='static'?0:s[axis.key])}));
+ return run.samples.map(s=>({...(axis.kind==='static'?{}:{[axis.key]:s[axis.key]}),...state(basic,axis.kind==='static'?(Number.isFinite(s.t)?s.t:0):s[axis.key])}));
 }
 // A basic approximation may stop before impact or cover only some displayed quantities.
 export function projectedBasicReference(view,run){const origin=run.columns?.[view.compare]?.origin;return !!view.compare&&(view.basicReference===true||typeof origin==='string'&&/analyt.*reference|basic.*reference/i.test(origin));}
