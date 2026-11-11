@@ -22,3 +22,10 @@ test('recorded and basic field plots use identical geometry and color bounds',()
  const fixed=referenceGeometry({kind:'field',min:-2,max:2},run,baseline);assert.equal(fixed.view.min,-2);assert.equal(fixed.view.max,2);
  assert.equal(referenceGeometry({kind:'field'},run,[{field:[0]}]).reference,false);
 });
+
+test('stored analytic reference columns receive an independently checked curve and common bounds',()=>{
+ const run={columns:{x:{unit:'m'},reference:{unit:'m',origin:'analytic reference'}},samples:[{t:0,x:1,reference:2},{t:1,x:3,reference:4}]},view={kind:'series',x:'t',y:'x',compare:'reference',basicReference:true},r=referenceGeometry(view,run,[]);
+ assert.equal(r.reference,true);assert.deepEqual(r.view.bounds,{xmin:0,xmax:1,ymin:1,ymax:4});assert.deepEqual(r.samples.map(s=>s.x),[2,4]);
+ const bad=structuredClone(run);bad.columns.reference.unit='s';assert.throws(()=>referenceGeometry(view,bad,[]),/matching units/);
+ bad.columns.reference.unit='m';delete bad.columns.reference.origin;assert.throws(()=>referenceGeometry(view,bad,[]),/explicit source origin/);
+});
