@@ -1,3 +1,4 @@
+import {axisLabelMatches} from './physics-axis-label.mjs';
 import{comparisonContract,checkAnalyticSteps}from'./physics-comparison.mjs';
 // R43 checks extend the basic-lesson checks; replay is mandatory, never a skipped PASS.
 import fs from 'node:fs/promises';import path from 'node:path';import {pathToFileURL} from 'node:url';
@@ -8,6 +9,7 @@ const equal=(a,b,message)=>require(canonical(a)===canonical(b),message);
 const fmt=n=>Number(n.toPrecision(10)).toString();
 export function visibleProvenance(data,run,shown){
  const expected={scenario:data.scenario,tool:data.tool,parameters:run.input,media:run.media,parameterUnits:run.inputUnits,workflow:data.workflow,validation:run.checks,decimation:run.decimation};
+ if(Object.hasOwn(shown,'channels'))expected.channels=run.columns;
  if(run.basicNormalization||Object.hasOwn(shown,'basicModel'))expected.basicModel=run.basic??data.basic;
  if(run.basicNormalization)expected.basicNormalization=run.basicNormalization;
  return expected;
@@ -17,12 +19,26 @@ export function referenceRows(run,basic,state){
  return run.samples.map(s=>({...(axis.kind==='static'?{}:{[axis.key]:s[axis.key]}),...state(basic,axis.kind==='static'?0:s[axis.key])}));
 }
 // A basic approximation may stop before impact or cover only some displayed quantities.
+export function projectedBasicReference(view,run){const origin=run.columns?.[view.compare]?.origin;return !!view.compare&&(view.basicReference===true||typeof origin==='string'&&/analyt.*reference|basic.*reference/i.test(origin));}
 export function referenceGeometry(view,run,baseline){
+ if(projectedBasicReference(view,run)){
+  const a=run.columns?.[view.y],b=run.columns?.[view.compare];
+  require(['series','phase','trajectory'].includes(view.kind)&&a&&b&&a.unit===b.unit&&typeof b.origin==='string'&&b.origin.trim(),'Projected reference needs matching units and an explicit source origin');
+  baseline=run.samples.map(s=>({...s,[view.y]:s[view.compare]}));
+ }
+
+ if(view.kind==='field'){
+  const count=run.field?.nx*(run.field?.ny??1),reference=baseline.length>0&&baseline.every(s=>Array.isArray(s.field)&&s.field.length===count&&s.field.every(Number.isFinite));
+  if(!reference)return {view:{...view},reference:false,samples:baseline};
+  const values=[...run.samples,...baseline].flatMap(s=>s.field);
+  return {view:{...view,min:view.min??values.reduce((a,b)=>Math.min(a,b),Infinity),max:view.max??values.reduce((a,b)=>Math.max(a,b),-Infinity)},reference:true,samples:baseline};
+ }
  const x=view.x??'t',y=view.y,valid=s=>Number.isFinite(s[x])&&Number.isFinite(s[y]);
  const reference=!['rigid','field'].includes(view.kind)&&baseline.some(valid);
- if(!reference){if(view.compare){const all=[...run.samples,...run.samples.map(s=>({...s,[y]:s[view.compare]}))];return{view:{...view,bounds:{xmin:Math.min(...all.map(s=>s[x])),xmax:Math.max(...all.map(s=>s[x])),ymin:Math.min(...all.map(s=>s[y])),ymax:Math.max(...all.map(s=>s[y]))}},reference:false};}return {view:{...view},reference:false};}
- const all=[...run.samples,...baseline].filter(valid);
- return {view:{...view,bounds:{xmin:Math.min(...all.map(s=>s[x])),xmax:Math.max(...all.map(s=>s[x])),ymin:Math.min(...all.map(s=>s[y])),ymax:Math.max(...all.map(s=>s[y])),...view.bounds}},reference:true};
+ if(!reference){if(view.compare){const all=[...run.samples,...run.samples.map(s=>({...s,[y]:s[view.compare]}))];return{view:{...view,bounds:{xmin:Math.min(...all.map(s=>s[x])),xmax:Math.max(...all.map(s=>s[x])),ymin:Math.min(...all.map(s=>s[y])),ymax:Math.max(...all.map(s=>s[y])),...view.bounds}},reference:false,samples:baseline};}return {view:{...view},reference:false,samples:baseline};}
+ const nativeComparison=view.compare&&!projectedBasicReference(view,run)?run.samples.map(s=>({...s,[y]:s[view.compare]})):[];
+ const all=[...run.samples,...baseline,...nativeComparison].filter(valid);
+ return {view:{...view,bounds:{xmin:Math.min(...all.map(s=>s[x])),xmax:Math.max(...all.map(s=>s[x])),ymin:Math.min(...all.map(s=>s[y])),ymax:Math.max(...all.map(s=>s[y])),...view.bounds}},reference:true,samples:baseline};
 }
 export function recordedSeekReached(run,index,attributes){
  const axis=run.axis??{key:'t',kind:'time',unit:'s'},last=run.samples.length-1;
@@ -69,12 +85,11 @@ export async function assertPlot(canvas,view,samples,index,columns,geometry){
   const xmin=view.bounds?.xmin??Math.min(...xs),xmax=view.bounds?.xmax??Math.max(...xs),ymin=view.bounds?.ymin??Math.min(...ys),ymax=view.bounds?.ymax??Math.max(...ys),px=x=>60+(x-xmin)/(xmax-xmin||1)*(el.width-70),py=y=>245-(y-ymin)/(ymax-ymin||1)*190;
   if((Number.isFinite(s[xkey])&&Number.isFinite(s[ykey])||!view.reference)&&!near(px(s[xkey]),py(s[ykey]),[[177,91,34]]))return {error:'Current recorded point is not plotted at its data coordinates'};
   let tested=0;for(let i=0;i<points.length;i+=Math.max(1,Math.floor(points.length/16))){if(!near(px(xs[i]),py(ys[i]),[[33,104,149],[177,91,34]]))return {error:'Recorded curve does not pass through its saved sample',sample:i};tested++;}
-  if(view.compare){for(let i=0;i<samples.length;i+=Math.max(1,Math.floor(samples.length/16)))if(!near(px(xs[i]),py(samples[i][view.compare]),[[177,91,34],[33,104,149]]))return {error:'Recorded comparison curve differs from its saved source column',sample:i,column:view.compare};}
-  for(const [k,lo,hi] of [[xkey,xmin,xmax],[ykey,ymin,ymax]])if(!labels.some(text=>text.includes(`${k} (${columns[k].unit})`)&&text.includes(fmt(lo))&&text.includes(fmt(hi))))return {error:'Plotted axis labels disagree with saved quantities/units',channel:k,labels};
+  if(view.compare&&!view.reference){for(let i=0;i<samples.length;i+=Math.max(1,Math.floor(samples.length/16)))if(!near(px(xs[i]),py(samples[i][view.compare]),[[123,76,154],[177,91,34],[33,104,149]]))return {error:'Recorded comparison curve differs from its saved source column',sample:i,column:view.compare};}
   let overlay;
   if(view.overlay){let candidates=0,visible=0;for(const p of view.overlay){const x=px(p[xkey]),y=py(p[ykey]);if(!Number.isFinite(x+y))continue;let distance=Infinity;for(let i=1;i<samples.length;i++){const ax=px(samples[i-1][xkey]),ay=py(samples[i-1][ykey]),bx=px(samples[i][xkey]),by=py(samples[i][ykey]),dx=bx-ax,dy=by-ay,u=Math.max(0,Math.min(1,((x-ax)*dx+(y-ay)*dy)/(dx*dx+dy*dy||1)));distance=Math.min(distance,Math.hypot(x-ax-u*dx,y-ay-u*dy));}if(distance<18)continue;candidates++;if(near(x,y,[[177,91,34]],6,48))visible++;}if(candidates&&!visible)return {error:'Basic-model dashed overlay is missing from recorded plot'};overlay={candidates,visible,indistinguishable:candidates===0};}
-  return {kind:view.kind,tested,labels,overlay};
- },{view,samples,index,columns,geometry});require(!evidence.error,JSON.stringify(evidence));return {...pixels,...evidence};
+  return {kind:view.kind,tested,labels,overlay,axisLabels:[[xkey,columns[xkey].unit,xmin,xmax],[ykey,columns[ykey].unit,ymin,ymax]]};
+ },{view,samples,index,columns,geometry});require(!evidence.error,JSON.stringify(evidence));for(const [key,unit,lo,hi] of evidence.axisLabels??[])require(axisLabelMatches(evidence.labels,key,unit,lo,hi),JSON.stringify({error:'Plotted axis labels disagree with saved quantities/units',key,unit,lo,hi,labels:evidence.labels}));return {...pixels,...evidence};
 }
 export async function checkRealThing(model,{page,request,book,root,toolRepo,binary,lmvideoRepo,lmvideoBinary,replay,cache=new Map()}={}){
  require(root,'R43 replay requires --content-root pointing to reviewed source');
@@ -93,7 +108,7 @@ export async function checkRealThing(model,{page,request,book,root,toolRepo,bina
    await video.evaluate(v=>new Promise((resolve,reject)=>{if(v.readyState>=2)return resolve();v.addEventListener('loadeddata',resolve,{once:true});v.addEventListener('error',()=>reject(Error('Recorded clip failed to decode')),{once:true});v.load();}));
    const meta=await video.evaluate(v=>({width:v.videoWidth,height:v.videoHeight,duration:v.duration}));require(meta.width>0&&meta.height>0&&Math.abs(meta.duration-run.media.playbackDurationS)<.1,'Decoded clip disagrees with replay duration');
   }
-  const comparison=comparisonContract(config,!!(run.basic??data.basic));const baseline=comparison==='overlay'?referenceRows(run,run.basic??data.basic,basicModule.basicState):[];
+  const modelBasic=run.basic??data.basic,comparison=comparisonContract(config,!!modelBasic||config.views.some(v=>projectedBasicReference(v,run)));const baseline=modelBasic?referenceRows(run,modelBasic,basicModule.basicState):[];
   const axis=run.axis??{key:'t',kind:'time',unit:'s'},last=run.samples.length-1;await seek.press('End');require(recordedSeekReached(run,await seek.inputValue(),{'data-time':await model.getAttribute('data-time'),'data-coordinate':await model.getAttribute('data-coordinate')}),'Seek did not reach the recorded coordinate');
   if(axis.kind!=='time')require(await model.locator('[data-action=play]').isHidden(),'A non-time scan must not expose physical-time Play');
   const text=await measurement.innerText();for(const [key,meta]of Object.entries(run.columns))require(text.includes(`${key} = ${fmt(run.samples[last][key])} ${meta.unit}`),'Readout differs from saved sample: '+key);
@@ -101,7 +116,7 @@ export async function checkRealThing(model,{page,request,book,root,toolRepo,bina
   const plots=[];let comparisons=0;const expectedView=v=>{const g=referenceGeometry(v,run,baseline);if(g.reference){const x=v.x??'t',y=v.y;g.view.overlay=baseline.filter(s=>Number.isFinite(s[x])&&Number.isFinite(s[y]));}return g.view;};
   for(let vi=0;vi<config.views.length;vi++){
    await viewSelect.selectOption(String(vi));const geometry=referenceGeometry(config.views[vi],run,baseline),view=expectedView(config.views[vi]),recorded=await assertPlot(canvases.nth(0),view,run.samples,last,run.columns,run.bodies??run.field);let basic;
-   if(geometry.reference){basic=await assertPlot(canvases.nth(1),{...view,reference:true},baseline,last,run.columns,run.field);comparisons++;}
+   if(geometry.reference){basic=await assertPlot(canvases.nth(1),{...view,reference:true},geometry.samples,last,run.columns,run.field);comparisons++;}
    else require(await canvases.nth(1).isHidden(),'A view without a comparable basic quantity must hide its baseline');
    plots.push({recorded,basic});
   }

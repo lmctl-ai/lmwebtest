@@ -9,6 +9,7 @@ test('real original lmvideo host replay rejects forged samples, source and media
  ['script',d=>d.runs[0].input.script+='\n',/Host resolved input/],
  ['parameters',d=>d.runs[0].parameters.radiusM=.9,/Host resolved input|Host parameters/],
  ['media',d=>d.runs[0].media.clipSha256='0'.repeat(64),/Replayed host clip hash/],
+ ['basic model',d=>d.runs[0].basic={model:'forged'},/Host basic model/],
  ['units',d=>d.runs[0].columns.y.unit='s',/Host channel units/],
  ['frame indices',d=>d.runs[0].decimation.indices[1]=2,/Host retained frames/],
  ['duration',d=>d.runs[0].media.physicalDurationS=4,/Host physical duration/],
