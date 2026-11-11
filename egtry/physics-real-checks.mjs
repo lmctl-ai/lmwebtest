@@ -16,7 +16,7 @@ export function visibleProvenance(data,run,shown){
 }
 export function referenceRows(run,basic,state){
  const axis=run.axis??{key:'t',kind:'time',unit:'s'};
- return run.samples.map(s=>({...(axis.kind==='static'?{}:{[axis.key]:s[axis.key]}),...state(basic,axis.kind==='static'?0:s[axis.key])}));
+ return run.samples.map(s=>({...(axis.kind==='static'?{}:{[axis.key]:s[axis.key]}),...state(basic,axis.kind==='static'?(Number.isFinite(s.t)?s.t:0):s[axis.key])}));
 }
 // A basic approximation may stop before impact or cover only some displayed quantities.
 export function projectedBasicReference(view,run){const origin=run.columns?.[view.compare]?.origin;return !!view.compare&&(view.basicReference===true||typeof origin==='string'&&/analyt.*reference|basic.*reference/i.test(origin));}
@@ -85,6 +85,7 @@ export async function assertPlot(canvas,view,samples,index,columns,geometry){
   const xmin=view.bounds?.xmin??Math.min(...xs),xmax=view.bounds?.xmax??Math.max(...xs),ymin=view.bounds?.ymin??Math.min(...ys),ymax=view.bounds?.ymax??Math.max(...ys),px=x=>60+(x-xmin)/(xmax-xmin||1)*(el.width-70),py=y=>245-(y-ymin)/(ymax-ymin||1)*190;
   if((Number.isFinite(s[xkey])&&Number.isFinite(s[ykey])||!view.reference)&&![[0,0],[-3,0],[3,0],[0,-3],[0,3]].every(([dx,dy])=>near(px(s[xkey])+dx,py(s[ykey])+dy,[[177,91,34]],1)))return {error:'Current recorded point is not plotted at its data coordinates'};
   let tested=0;for(let i=0;i<points.length;i+=Math.max(1,Math.floor(points.length/16))){if(!near(px(xs[i]),py(ys[i]),[[33,104,149],[177,91,34]]))return {error:'Recorded curve does not pass through its saved sample',sample:i};tested++;}
+  if(view.compare&&!view.reference){for(let i=0;i<samples.length;i+=Math.max(1,Math.floor(samples.length/16)))if(!near(px(xs[i]),py(samples[i][view.compare]),[[123,76,154],[177,91,34],[33,104,149]]))return {error:'Recorded comparison curve differs from its saved source column',sample:i,column:view.compare};}
   let overlay;
   if(view.overlay){
    const curve=view.overlay.filter(p=>Number.isFinite(p[xkey])&&Number.isFinite(p[ykey])),real=samples.filter(p=>Number.isFinite(p[xkey])&&Number.isFinite(p[ykey]));let candidates=0,visible=0;
@@ -134,6 +135,7 @@ export async function checkRealThing(model,{page,request,book,root,toolRepo,bina
   }
   const modelBasic=run.basic??data.basic,comparison=comparisonContract(config,!!modelBasic||config.views.some(v=>projectedBasicReference(v,run)));const baseline=modelBasic?referenceRows(run,modelBasic,basicModule.basicState):[];
   const axis=run.axis??{key:'t',kind:'time',unit:'s'},last=run.samples.length-1;await seek.press('End');require(recordedSeekReached(run,await seek.inputValue(),{'data-time':await model.getAttribute('data-time'),'data-coordinate':await model.getAttribute('data-coordinate')}),'Seek did not reach the recorded coordinate');
+  if(axis.kind!=='time')require(await model.locator('[data-action=play]').isHidden(),'A non-time scan must not expose physical-time Play');
   const text=await measurement.innerText();for(const [key,meta]of Object.entries(run.columns))require(text.includes(`${key} = ${fmt(run.samples[last][key])} ${meta.unit}`),'Readout differs from saved sample: '+key);
   const signature=canonical(run.samples.map(({t,...values})=>values));if(signatures.length&&signature!==signatures[0])varied=true;signatures.push(signature);
   const plots=[];let comparisons=0;const expectedView=v=>{const g=referenceGeometry(v,run,baseline);if(g.reference){const x=v.x??'t',y=v.y;g.view.overlay=g.samples.filter(s=>Number.isFinite(s[x])&&Number.isFinite(s[y]));}return g.view;};

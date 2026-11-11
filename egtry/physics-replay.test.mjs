@@ -5,6 +5,23 @@ import fs from 'node:fs/promises';import path from 'node:path';import os from 'n
 import {execFile} from 'node:child_process';import {promisify} from 'node:util';import {fileURLToPath} from 'node:url';
 import {verifyRecordedRuns,digest} from './physics-replay.mjs';
 const exec=promisify(execFile);
+test('reviewed workflow parameters bind discovery and replay without becoming native CLI inputs',async()=>{
+ const f=await makeReplayFixture();try{
+  const {discoverRecipe}=await import('./physics-replay.mjs'),options={root:f.root,toolRepo:f.toolRepo,binary:f.binary};
+  for(let i=0;i<f.recipe.runs.length;i++){
+   f.recipe.runs[i].parameters={noise_sd_rad:.01,measurement_seed:7};
+   f.data.runs[i].parameters={...f.data.runs[i].parameters,noise_sd_rad:.01,measurement_seed:7};
+  }
+  const file=path.join(f.root,'scripts/physics/workflow.json');await fs.writeFile(file,JSON.stringify(f.recipe));
+  assert.deepEqual(await discoverRecipe(f.data,f.root),f.recipe);
+  assert.equal((await verifyRecordedRuns(f.data,f.recipe,options)).status,'PASS');
+  const changed=structuredClone(f.data);changed.runs[0].parameters.measurement_seed=8;
+  await assert.rejects(verifyRecordedRuns(changed,f.recipe,options),/Visible sweep parameters/);
+  await assert.rejects(discoverRecipe(changed,f.root),/found 0/);
+  const injected=structuredClone(f.data);injected.runs[0].input.measurement_seed=7;
+  await assert.rejects(verifyRecordedRuns(injected,f.recipe,options),/Recorded input/);
+ }finally{await f.dispose();}
+});
 test('replay production entry rejects forged samples and provenance (explicit fixture tool)',async t=>{
  const fixture=await makeReplayFixture(),{dir,root,toolRepo,binary,data,recipe}=fixture;
  try{
