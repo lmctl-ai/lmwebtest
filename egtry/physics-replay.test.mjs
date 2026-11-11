@@ -49,3 +49,24 @@ test('field cell mutation with a recomputed checksum still fails actual-output c
   f.data.runs[0].samples[0].field[0]++;f.data.runs[0].samplesSha256=digest(JSON.stringify(f.data.runs[0].samples));await assert.rejects(verifyRecordedRuns(f.data,f.recipe,options),/Published numeric samples/);
  }finally{await f.dispose();}
 });
+
+// Optional actual-native integration: never substitute fixture values for CPU poses.
+test('native stack replay binds its basic energy budget to the resolved run bodies', {skip:!process.env.PHYSICS_NATIVE_REPLAY_ROOT},async()=>{
+ const root=process.env.PHYSICS_NATIVE_REPLAY_ROOT;
+ const {discoverRecipe,verifyMutationRejected}=await import('./physics-replay.mjs');
+ const data=JSON.parse(await fs.readFile(path.join(root,'content/books/mechanics/assets/real/rigid-stack.json'),'utf8')),recipe=await discoverRecipe(data,root),options={root};
+ assert.equal((await verifyRecordedRuns(data,recipe,options)).status,'PASS');
+ const changed=structuredClone(data);changed.runs[0].basic.parameters.bodies[0].mass+=1;
+ await assert.rejects(verifyRecordedRuns(changed,recipe,options),/Rigid basic model/);
+ const mutations=await verifyMutationRejected(data,recipe,options);assert.ok(mutations.some(m=>m.path.endsWith('poses.0.0')));
+});
+
+test('native channel provenance labels are replayed exactly rather than discarded',async()=>{
+ const f=await makeReplayFixture();try{
+  f.recipe.columns.x.origin='native simulation';f.recipe.columns.x.label='Recorded position';
+  for(const r of f.data.runs)Object.assign(r.columns.x,{origin:'native simulation',label:'Recorded position'});
+  const options={root:f.root,toolRepo:f.toolRepo,binary:f.binary};assert.equal((await verifyRecordedRuns(f.data,f.recipe,options)).status,'PASS');
+  const wrong=structuredClone(f.data);wrong.runs[0].columns.x.origin='analytic reference';await assert.rejects(verifyRecordedRuns(wrong,f.recipe,options),/channel units/);
+  wrong.runs[0].columns.x.origin='native simulation';wrong.runs[0].columns.x.label='Invented interpretation';await assert.rejects(verifyRecordedRuns(wrong,f.recipe,options),/channel units/);
+ }finally{await f.dispose();}
+});
