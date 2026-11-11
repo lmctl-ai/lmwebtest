@@ -29,7 +29,9 @@ test('seek verifies the declared space/frequency coordinate and keeps time separ
   assert.equal(recordedSeekReached(run,'1',{[attribute]:String(last)}),true);
   assert.equal(recordedSeekReached(run,'0',{[attribute]:String(last)}),false);
   assert.equal(recordedSeekReached(run,'1',{[attribute]:String(last+1)}),false);
-  assert.equal(recordedSeekReached(run,'1',{[kind==='time'?'data-coordinate':'data-time']:String(last)}),false);
+  assert.equal(recordedSeekReached(run,'1',{}),false);
+  if(kind==='time')assert.equal(recordedSeekReached(run,'1',{'data-coordinate':String(last)}),false);
+  else{assert.equal(recordedSeekReached(run,'1',{'data-time':String(last)}),true);assert.equal(recordedSeekReached(run,'1',{'data-coordinate':String(last+1),'data-time':String(last)}),false);}
  }
  assert.equal(recordedSeekReached({axis:{kind:'static'},samples:[{mean:8}]},'0',{}),true);
  assert.equal(recordedSeekReached({axis:{kind:'space',key:'y'},samples:[{y:-1},{y:0}]},'1',{'data-coordinate':null}),false);
