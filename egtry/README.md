@@ -323,3 +323,16 @@ Run the targeted visibility/quantity regressions under the shared gate:
 ```bash
 bash browser-lock.sh /tmp/browser-gate.lock node --test physics-quantity.test.mjs
 ```
+
+### R43 recorded real-run verification
+
+`physics-replay.mjs` independently invokes the pinned physim executable and compares every published scalar/field sample, raw-output hash, input, units, decimation index, basic-model declaration and recomputed physical-check evidence. It does not call the authoring exporter. Missing tools or unsupported adapters fail closed; this is separate from human scientific acceptance.
+
+```bash
+node physics-replay.mjs --root /path/to/interp-docs \
+  --asset /path/to/interp-docs/content/books/mechanics/assets/real/projectile-drag.json \
+  --recipe /path/to/interp-docs/scripts/physics/scenarios/mechanics-projectile.json \
+  --out /tmp/projectile-replay-qa.json
+```
+
+The default executable is `~/repos/lmctlhq/physim/target/release/physim`, or `PHYSIM_BIN` / `--binary`; `--tool-repo` selects its reviewed source repository. The recorded executable digest, version and clean source commit must match. A recorded `recipe.file` plus SHA256 is preferred; otherwise one unique matching recipe under `scripts/physics/scenarios/` or `scripts/physics/r43/` is required, or supply `--recipe`. A cache stores only genuine raw CLI outputs; every asset is compared afresh, so editing an asset value fails even after a prior successful verification.
