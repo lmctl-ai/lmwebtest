@@ -23,7 +23,7 @@ test('thin horizontal reference lines remain visible over an axis without accept
 test('playback pixel probe rejects stationary frames and latches a closed trace',async()=>{
  const {startPlaybackPixels,stopPlaybackPixels}=await import('./physics-real-checks.mjs'),{canvasPixels}=await import('./physics-checks.mjs'),browser=await chromium.launch();
  try{for(const width of [1280,390]){const page=await browser.newPage({viewport:{width,height:900}});await page.setContent('<canvas width="160" height="120"></canvas>');const canvas=page.locator('canvas');await canvas.evaluate(el=>{const c=el.getContext('2d');c.fillStyle='white';c.fillRect(0,0,160,120);});
-  await startPlaybackPixels(canvas);await page.waitForTimeout(100);const frozen=await stopPlaybackPixels(canvas);assert.equal(frozen.changed,false);assert.ok(frozen.frames>0);
+  await startPlaybackPixels(canvas);await page.waitForFunction(el=>el.__physicsQaPlayback?.frames>1,await canvas.elementHandle(),{timeout:3000});const frozen=await stopPlaybackPixels(canvas);assert.equal(frozen.changed,false);assert.ok(frozen.frames>0);
   await startPlaybackPixels(canvas);await canvas.evaluate(async el=>{const frame=()=>new Promise(r=>requestAnimationFrame(r)),c=el.getContext('2d');await frame();c.fillStyle='blue';c.fillRect(0,0,160,120);await frame();await frame();c.fillStyle='white';c.fillRect(0,0,160,120);});
   const closed=await stopPlaybackPixels(canvas);assert.equal(closed.changed,true);assert.notEqual(closed.beforeHash,closed.afterHash);assert.equal((await canvasPixels(canvas)).hash,closed.beforeHash);await page.close();
  }}finally{await browser.close();}
