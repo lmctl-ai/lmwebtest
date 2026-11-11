@@ -416,3 +416,13 @@ Nonzero kicks and all other clips retain the moving-frame requirement.
 `physics-native-motion.test.mjs` rejects incomplete/duplicate rows, real motion,
 changed bounds and fabricated flags; the browser media fixture checks both the
 exception and the existing static-substitution rejection.
+
+Native World/PhysicsTake assets may also declare host-rendered clips. These
+attachments are never accepted from asset hashes alone: physics-rigid-media.mjs
+replays the pinned host script, verifies the host/compiler/source identities,
+matches every dynamic-body XY ledger row to the independent native take, checks
+actual frame count/rate, and compares actual rendered and published clip/poster
+bytes before returning media identities. Incomplete/reordered ledgers,
+displaced bodies, forged hashes and changed render/source bytes fail regressions.
+Book-level and browser adapters pass the source book automatically; direct
+physics-replay.mjs calls infer it from content/books/BOOK/assets or accept --book.
