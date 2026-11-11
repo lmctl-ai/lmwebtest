@@ -68,10 +68,10 @@ export async function runPhysicsQA(opt) {
   const hashFile = async file => createHash('sha256').update(await fs.readFile(file)).digest('hex');
   const helperSha256 = await hashFile(fileURLToPath(import.meta.url));
   const checksSha256 = await hashFile(new URL('./physics-checks.mjs', import.meta.url));
-  const realChecksSha256=await hashFile(new URL('./physics-real-checks.mjs',import.meta.url)),replaySha256=await hashFile(new URL('./physics-replay.mjs',import.meta.url)),lmvideoChecksSha256=await hashFile(new URL('./physics-lmvideo-script.mjs',import.meta.url));
+  const realChecksSha256=await hashFile(new URL('./physics-real-checks.mjs',import.meta.url)),replaySha256=await hashFile(new URL('./physics-replay.mjs',import.meta.url)),lmvideoChecksSha256=await hashFile(new URL('./physics-lmvideo-script.mjs',import.meta.url)),comparisonSha256=await hashFile(new URL('./physics-comparison.mjs',import.meta.url));
   const scenarioSource = opt.scenarios ? {file: opt.scenarios, sha256: await hashFile(opt.scenarios), families: Object.keys(scenarios)} : null;
   const realCache=new Map();let realWidgetCount=0;
-  const report = { referencePolicy: planned ? 'new-book-inventory' : 'live-legacy-index', scientificReview: 'NOT PERFORMED', workers:workerCount, helperSha256, checksSha256, realChecksSha256, replaySha256, lmvideoChecksSha256, scenarioSource, suite: 'egtry-physics', timestamp: new Date().toISOString(), book: opt.book, host: base, legacy, seed: opt.seed, checks: [], legacySlugs: [], targetSlugs: [], testedSlugs: [] };
+  const report = { referencePolicy: planned ? 'new-book-inventory' : 'live-legacy-index', scientificReview: 'NOT PERFORMED', workers:workerCount, helperSha256, checksSha256, realChecksSha256, replaySha256, lmvideoChecksSha256, comparisonSha256, scenarioSource, suite: 'egtry-physics', timestamp: new Date().toISOString(), book: opt.book, host: base, legacy, seed: opt.seed, checks: [], legacySlugs: [], targetSlugs: [], testedSlugs: [] };
   const dir = opt['out-dir'] || path.join(path.dirname(fileURLToPath(import.meta.url)), 'work');
   await fs.mkdir(dir, {recursive:true});
   const progressPath = path.join(dir, `physics_progress_${opt.book}.json`);
@@ -187,7 +187,8 @@ export async function runPhysicsQA(opt) {
             check(true, `Canvas nonblank ${m + 1} ${label}`, JSON.stringify(before));
             if(await model.getAttribute('data-real-thing')!==null){realWidgetCount++;
               const evidence=await checkRealThing(model,{page,request:context.request,book:opt.book,root:opt['content-root'],toolRepo:opt['physim-repo'],binary:opt['physim-bin'],lmvideoRepo:opt['lmvideo-repo'],lmvideoBinary:opt['lmvideo-bin'],replay:scope=>workedReplay(scope,{minimumSteps:3}),cache:realCache});
-              check(true,`Real provenance/replay/widget ${m+1} ${label}`,JSON.stringify(evidence));return;
+              check(true,`Real provenance/replay/widget ${m+1} ${label}`,JSON.stringify(evidence));
+              check(evidence.runs.every(r=>r.plots.some(v=>v.basic?.tested>0)),`Basic model overlay ${m+1} ${label}`,'R43 requires a plotted basic-model reference; analytic text is separate evidence');return;
             }
             const mode = await model.getAttribute('data-model-mode');
             if (mode === 'static' || await model.getAttribute('data-mode') === 'parameter' || ['quantity', 'quantity-solver', 'static'].includes(await model.getAttribute('data-model-kind'))) {
