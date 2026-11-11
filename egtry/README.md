@@ -394,4 +394,8 @@ bash browser-lock.sh /tmp/browser-gate.lock node --test --test-concurrency=1 \
   physics-real-checks.test.mjs physics-animation.test.mjs
 ```
 
-Extended decoded-clip playback checks are being verified separately.
+Decoded-clip receipts include the requested and actual times for both seeks,
+with a bounded tolerance. A seek event that stays at time zero fails. The
+fixture HTTP server supports byte ranges so Chrome can decode the requested
+frames. The clip regression covers positive playback at 1280/390 and rejects
+forged bytes, hidden video/controls and a static encoded clip.
