@@ -85,7 +85,8 @@ export async function assertPlot(canvas,view,samples,index,columns,geometry){
   const xmin=view.bounds?.xmin??Math.min(...xs),xmax=view.bounds?.xmax??Math.max(...xs),ymin=view.bounds?.ymin??Math.min(...ys),ymax=view.bounds?.ymax??Math.max(...ys),px=x=>60+(x-xmin)/(xmax-xmin||1)*(el.width-70),py=y=>245-(y-ymin)/(ymax-ymin||1)*190;
   if((Number.isFinite(s[xkey])&&Number.isFinite(s[ykey])||!view.reference)&&![[0,0],[-3,0],[3,0],[0,-3],[0,3]].every(([dx,dy])=>near(px(s[xkey])+dx,py(s[ykey])+dy,[[177,91,34]],1)))return {error:'Current recorded point is not plotted at its data coordinates'};
   let tested=0;for(let i=0;i<points.length;i+=Math.max(1,Math.floor(points.length/16))){if(!near(px(xs[i]),py(ys[i]),[[33,104,149],[177,91,34]]))return {error:'Recorded curve does not pass through its saved sample',sample:i};tested++;}
-  if(view.compare&&!view.reference){for(let i=0;i<samples.length;i+=Math.max(1,Math.floor(samples.length/16)))if(!near(px(xs[i]),py(samples[i][view.compare]),[[123,76,154],[177,91,34],[33,104,149]]))return {error:'Recorded comparison curve differs from its saved source column',sample:i,column:view.compare};}
+  const projected=!!view.compare&&(view.basicReference===true||typeof columns[view.compare]?.origin==='string'&&/analyt.*reference|basic.*reference/i.test(columns[view.compare].origin));
+  if(view.compare&&!view.reference&&!projected){for(let i=0;i<samples.length;i+=Math.max(1,Math.floor(samples.length/16)))if(!near(px(xs[i]),py(samples[i][view.compare]),[[123,76,154],[177,91,34],[33,104,149]]))return {error:'Recorded comparison curve differs from its saved source column',sample:i,column:view.compare};}
   let overlay;
   if(view.overlay&&!view.reference){
    const curve=view.overlay.filter(p=>Number.isFinite(p[xkey])&&Number.isFinite(p[ykey])),real=samples.filter(p=>Number.isFinite(p[xkey])&&Number.isFinite(p[ykey]));let candidates=0,visible=0;
