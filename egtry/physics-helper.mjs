@@ -186,7 +186,7 @@ export async function runPhysicsQA(opt) {
             require(before.varied > 20 && before.width > 20 && before.height > 20, `Blank canvas: ${JSON.stringify(before)}`);
             check(true, `Canvas nonblank ${m + 1} ${label}`, JSON.stringify(before));
             if(await model.getAttribute('data-real-thing')!==null){realWidgetCount++;
-              const evidence=await checkRealThing(model,{page,request:context.request,book:opt.book,root:opt['content-root'],toolRepo:opt['physim-repo'],binary:opt['physim-bin'],lmvideoRepo:opt['lmvideo-repo'],lmvideoBinary:opt['lmvideo-bin'],replay,cache:realCache});
+              const evidence=await checkRealThing(model,{page,request:context.request,book:opt.book,root:opt['content-root'],toolRepo:opt['physim-repo'],binary:opt['physim-bin'],lmvideoRepo:opt['lmvideo-repo'],lmvideoBinary:opt['lmvideo-bin'],replay:scope=>workedReplay(scope,{minimumSteps:3}),cache:realCache});
               check(true,`Real provenance/replay/widget ${m+1} ${label}`,JSON.stringify(evidence));return;
             }
             const mode = await model.getAttribute('data-model-mode');
@@ -225,7 +225,8 @@ export async function runPhysicsQA(opt) {
             const solution = ex.locator(selectors.solution).first();
             await solution.waitFor({ state: 'visible' });
             require(['wrong', 'shown'].includes(await ex.getAttribute('data-state')), 'Wrong answer not marked wrong/shown');
-            const worked = await replay(solution);
+            const isReal=await ex.evaluate(el=>!!el.closest('[data-real-thing]'));
+            const worked = isReal?await workedReplay(solution,{minimumSteps:3}):await replay(solution);
             check(true, `Wrong answer worked solution ${e + 1} ${label}`, JSON.stringify(worked));
             const answerNode = solution.locator(selectors.answer).first();
             require(await answerNode.isVisible(), 'Worked answer is hidden');

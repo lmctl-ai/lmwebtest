@@ -28,3 +28,14 @@ test('replay production entry rejects forged samples and provenance (explicit fi
   await t.test('CLI rejects actual edited asset after a clean replay',async()=>{const asset=path.join(dir,'asset.json'),recipeFile=path.join(dir,'recipe.json'),cli=fileURLToPath(new URL('./physics-replay.mjs',import.meta.url));await fs.writeFile(recipeFile,JSON.stringify(recipe));const args=[cli,'--root',root,'--asset',asset,'--recipe',recipeFile,'--tool-repo',toolRepo,'--binary',binary,'--mutation-check'];await fs.writeFile(asset,JSON.stringify(data));assert.match((await exec(process.execPath,args)).stdout,/'?PASS'?/);const changed=structuredClone(data);changed.runs[0].samples[1].x+=.125;await fs.writeFile(asset,JSON.stringify(changed));await assert.rejects(exec(process.execPath,args),e=>e.code===1&&/Published numeric samples/.test(e.stderr));});
  }finally{await fixture.dispose();}
 });
+
+test('reviewed projections are recomputed from native output and retain exact lineage',async()=>{
+ const f=await makeReplayFixture();try{
+  const file=path.join(f.root,f.recipe.validator);await fs.appendFile(file,`export const project=({raw})=>({method:'Double native x, explicit fixture conversion',rows:raw.samples.map(s=>({...s,x:2*s.x})),sourceIndices:raw.samples.map((s,i)=>[i])});\n`);
+  f.data.validator.sha256=digest(await fs.readFile(file));
+  for(const r of f.data.runs){r.samples=r.samples.map(s=>({...s,x:2*s.x}));r.decimation.projection={method:'Double native x, explicit fixture conversion',sourceCount:3,sourceIndices:[[0],[2]]};}
+  const options={root:f.root,toolRepo:f.toolRepo,binary:f.binary};assert.equal((await verifyRecordedRuns(f.data,f.recipe,options)).status,'PASS');
+  const wrong=structuredClone(f.data);wrong.runs[0].samples[1].x+=1;wrong.runs[0].samplesSha256=digest(JSON.stringify(wrong.runs[0].samples));await assert.rejects(verifyRecordedRuns(wrong,f.recipe,options),/Published numeric samples/);
+  const lineage=structuredClone(f.data);lineage.runs[0].decimation.projection.sourceIndices[1]=[1];await assert.rejects(verifyRecordedRuns(lineage,f.recipe,options),/Projection lineage/);
+ }finally{await f.dispose();}
+});

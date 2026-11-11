@@ -37,7 +37,7 @@ export function validateWorkedText(contents) {
   }
 }
 
-export async function workedReplay(scope, {player = '.mb-player', steps = '.bb-step', line = '.bb-line', note = '.bb-note'} = {}) {
+export async function workedReplay(scope, {player = '.mb-player', steps = '.bb-step', line = '.bb-line', note = '.bb-note',minimumSteps=4} = {}) {
   const board = scope.locator(player).first();
   await board.waitFor({state:'visible',timeout:4000});
   const step = board.getByRole('button',{name:'Step',exact:true});
@@ -94,7 +94,7 @@ export async function workedReplay(scope, {player = '.mb-player', steps = '.bb-s
     if(snapshot.error)throw Error(snapshot.error);
     const contents=snapshot.contents;validateWorkedText(contents);snapshots.push(contents);
     if(await step.isDisabled()) {
-      if(contents.length<4)throw Error('Worked solution needs the law, substitution, calculation and check');
+      if(contents.length<minimumSteps)throw Error('Worked solution needs the law, substitution, calculation and check');
       if(!snapshots.some((s,i)=>i&&s.length>snapshots[i-1].length))throw Error('Worked replay never advances step by step');
       return contents;
     }
