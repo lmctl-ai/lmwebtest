@@ -35,8 +35,9 @@ export function referenceGeometry(view,run,baseline){
  }
  const x=view.x??'t',y=view.y,valid=s=>Number.isFinite(s[x])&&Number.isFinite(s[y]);
  const reference=!['rigid','field'].includes(view.kind)&&baseline.some(valid);
- if(!reference){if(view.compare){const all=[...run.samples,...run.samples.map(s=>({...s,[y]:s[view.compare]}))];return{view:{...view,bounds:{xmin:Math.min(...all.map(s=>s[x])),xmax:Math.max(...all.map(s=>s[x])),ymin:Math.min(...all.map(s=>s[y])),ymax:Math.max(...all.map(s=>s[y]))}},reference:false,samples:baseline};}return {view:{...view},reference:false,samples:baseline};}
- const all=[...run.samples,...baseline].filter(valid);
+ if(!reference){if(view.compare){const all=[...run.samples,...run.samples.map(s=>({...s,[y]:s[view.compare]}))];return{view:{...view,bounds:{xmin:Math.min(...all.map(s=>s[x])),xmax:Math.max(...all.map(s=>s[x])),ymin:Math.min(...all.map(s=>s[y])),ymax:Math.max(...all.map(s=>s[y])),...view.bounds}},reference:false,samples:baseline};}return {view:{...view},reference:false,samples:baseline};}
+ const nativeComparison=view.compare&&!projectedBasicReference(view,run)?run.samples.map(s=>({...s,[y]:s[view.compare]})):[];
+ const all=[...run.samples,...baseline,...nativeComparison].filter(valid);
  return {view:{...view,bounds:{xmin:Math.min(...all.map(s=>s[x])),xmax:Math.max(...all.map(s=>s[x])),ymin:Math.min(...all.map(s=>s[y])),ymax:Math.max(...all.map(s=>s[y])),...view.bounds}},reference:true,samples:baseline};
 }
 export function recordedSeekReached(run,index,attributes){

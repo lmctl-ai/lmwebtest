@@ -30,3 +30,8 @@ test('stored analytic reference columns receive an independently checked curve a
  const bad=structuredClone(run);bad.columns.reference.unit='s';assert.throws(()=>referenceGeometry(view,bad,[]),/matching units/);
  bad.columns.reference.unit='m';delete bad.columns.reference.origin;assert.throws(()=>referenceGeometry(view,bad,[]),/explicit source origin/);
 });
+
+test('native estimates affect the shared scale while remaining separate from the basic curve',()=>{
+ const run={samples:[{t:0,x:2,estimate:3},{t:1,x:4,estimate:5}]},baseline=[{t:0,x:1},{t:1,x:2}],r=referenceGeometry({kind:'series',x:'t',y:'x',compare:'estimate'},run,baseline);
+ assert.equal(r.reference,true);assert.deepEqual(r.samples,baseline);assert.deepEqual(r.view.bounds,{xmin:0,xmax:1,ymin:1,ymax:5});
+});
