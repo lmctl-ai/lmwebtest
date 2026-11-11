@@ -336,3 +336,16 @@ node physics-replay.mjs --root /path/to/interp-docs \
 ```
 
 The default executable is `~/repos/lmctlhq/physim/target/release/physim`, or `PHYSIM_BIN` / `--binary`; `--tool-repo` selects its reviewed source repository. The recorded executable digest, version and clean source commit must match. A recorded `recipe.file` plus SHA256 is preferred; otherwise one unique matching recipe under `scripts/physics/scenarios/` or `scripts/physics/r43/` is required, or supply `--recipe`. A cache stores only genuine raw CLI outputs; every asset is compared afresh, so editing an asset value fails even after a prior successful verification.
+
+The R43 browser suite keeps the R42 checks and adds every recorded run/view at both widths, visible exact provenance, data-coordinate pixel probes, shared-scale basic overlays, run switching, seek/play/pause/step, worked comparisons, and opened-footer layout. Pass the reviewed source so served assets can be compared byte for byte:
+
+```bash
+bash run.sh --physics --book mechanics --host http://127.0.0.1:8080 \
+  --content-root /path/to/interp-docs --require-real true
+node physics-real-book.mjs --root /path/to/interp-docs --book mechanics \
+  --require-data --out /tmp/mechanics-real-replay.json
+```
+
+`physics-real-book.mjs` replays every book asset before Chrome. Both entrypoints accept `--physim-repo`, `--physim-bin`, `--lmvideo-repo`, and `--lmvideo-bin`. The native lmvideo adapter invokes the pinned World/PhysicsTake CPU exporter directly, reconstructs its input independently and compares every scalar and all seven pose coordinates. Its default binary is `/tmp/r43-lmvideo-native/egtry_rigid_export`; build the native exporter from reviewed `scripts/physics/native/` when absent. The executable hash and clean lmvideo source commit must match the asset.
+
+Every replay gate injects numeric mutations (scalar, field cell, rigid pose when present), updates the sample checksum, and demands rejection by the independent numeric comparison. Fixture tests include a deliberately disabled comparison to ensure this guard cannot silently stop working. Browser fixtures reject forged/hidden provenance, hidden basic overlays, frozen markers, wrong axis labels, broken seeking/stepping, overflow and edited served/source assets. These fixture runs are explicitly synthetic tests of QA code; they do not establish physical correctness.

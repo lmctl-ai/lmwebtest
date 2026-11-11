@@ -1,5 +1,5 @@
 // Behavioral checks shared by the physics CLI and its adversarial fixtures.
-async function perceptible(locator, {ink = true} = {}) {
+export async function perceptible(locator, {ink = true} = {}) {
   if (!await locator.isVisible()) return false;
   return locator.evaluate((el, ink) => {
     const rect=el.getBoundingClientRect();

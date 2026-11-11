@@ -5,6 +5,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import {checkRealThing,installRealCanvasProbe} from './physics-real-checks.mjs';
 import {newBookReference} from './physics-reference.mjs';
 import { workedReplay, splitAnswer, quantitySolver, canvasPixels } from './physics-checks.mjs';
 
@@ -39,9 +40,9 @@ export async function modelScopes(page, selectors = defaults) {
 }
 function options(args) {
   const out = { book: 'mechanics', host: 'www.egtry.com', 'v1-host': 'v1.egtry.com', pages: 'all', seed: '731', workers:'1' };
-  const keys = new Set([...Object.keys(out), 'report', 'selectors', 'out-dir', 'scenarios', 'inventory']);
+  const keys = new Set([...Object.keys(out), 'report', 'selectors', 'out-dir', 'scenarios', 'inventory', 'content-root', 'physim-bin', 'physim-repo', 'lmvideo-bin', 'lmvideo-repo', 'require-real']);
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--help') { console.log('physics.lms --book SLUG --host HOST [--v1-host HOST] [--pages N|all] [--seed N] [--selectors FILE] [--report FILE] [--out-dir DIR] [--scenarios FILE] [--inventory FILE] [--workers 1..4]'); process.exit(0); }
+    if (args[i] === '--help') { console.log('physics.lms --book SLUG --host HOST [--v1-host HOST] [--pages N|all] [--seed N] [--selectors FILE] [--report FILE] [--out-dir DIR] [--scenarios FILE] [--inventory FILE] [--workers 1..4] [--content-root REPO] [--physim-bin FILE] [--physim-repo DIR]'); process.exit(0); }
     const key = args[i].replace(/^--/, '');
     if (!args[i].startsWith('--') || !keys.has(key) || !args[i + 1] || args[i + 1].startsWith('--')) throw Error(`Invalid option: ${args[i]}`);
     out[key] = args[++i];
@@ -67,8 +68,10 @@ export async function runPhysicsQA(opt) {
   const hashFile = async file => createHash('sha256').update(await fs.readFile(file)).digest('hex');
   const helperSha256 = await hashFile(fileURLToPath(import.meta.url));
   const checksSha256 = await hashFile(new URL('./physics-checks.mjs', import.meta.url));
+  const realChecksSha256=await hashFile(new URL('./physics-real-checks.mjs',import.meta.url)),replaySha256=await hashFile(new URL('./physics-replay.mjs',import.meta.url));
   const scenarioSource = opt.scenarios ? {file: opt.scenarios, sha256: await hashFile(opt.scenarios), families: Object.keys(scenarios)} : null;
-  const report = { referencePolicy: planned ? 'new-book-inventory' : 'live-legacy-index', scientificReview: 'NOT PERFORMED', workers:workerCount, helperSha256, checksSha256, scenarioSource, suite: 'egtry-physics', timestamp: new Date().toISOString(), book: opt.book, host: base, legacy, seed: opt.seed, checks: [], legacySlugs: [], targetSlugs: [], testedSlugs: [] };
+  const realCache=new Map();let realWidgetCount=0;
+  const report = { referencePolicy: planned ? 'new-book-inventory' : 'live-legacy-index', scientificReview: 'NOT PERFORMED', workers:workerCount, helperSha256, checksSha256, realChecksSha256, replaySha256, scenarioSource, suite: 'egtry-physics', timestamp: new Date().toISOString(), book: opt.book, host: base, legacy, seed: opt.seed, checks: [], legacySlugs: [], targetSlugs: [], testedSlugs: [] };
   const dir = opt['out-dir'] || path.join(path.dirname(fileURLToPath(import.meta.url)), 'work');
   await fs.mkdir(dir, {recursive:true});
   const progressPath = path.join(dir, `physics_progress_${opt.book}.json`);
@@ -154,6 +157,7 @@ export async function runPhysicsQA(opt) {
       });
       const visitLesson=async lesson=>{
         const page = await context.newPage();
+        await installRealCanvasProbe(page);
         await page.setViewportSize({ width, height: 900 }); page.setDefaultTimeout(4000);
         const errors = [];
         page.on('console', m => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); });
@@ -181,6 +185,10 @@ export async function runPhysicsQA(opt) {
             const before = await pixels();
             require(before.varied > 20 && before.width > 20 && before.height > 20, `Blank canvas: ${JSON.stringify(before)}`);
             check(true, `Canvas nonblank ${m + 1} ${label}`, JSON.stringify(before));
+            if(await model.getAttribute('data-real-thing')!==null){realWidgetCount++;
+              const evidence=await checkRealThing(model,{page,request:context.request,book:opt.book,root:opt['content-root'],toolRepo:opt['physim-repo'],binary:opt['physim-bin'],lmvideoRepo:opt['lmvideo-repo'],lmvideoBinary:opt['lmvideo-bin'],replay,cache:realCache});
+              check(true,`Real provenance/replay/widget ${m+1} ${label}`,JSON.stringify(evidence));return;
+            }
             const mode = await model.getAttribute('data-model-mode');
             if (mode === 'static' || await model.getAttribute('data-mode') === 'parameter' || ['quantity', 'quantity-solver', 'static'].includes(await model.getAttribute('data-model-kind'))) {
               const evidence = await quantitySolver(model, replay, {parameter: selectors.staticParameter, result: selectors.staticResult, observe: async () => (await pixels()).hash, scenarios: await casesFor(model)});
@@ -206,7 +214,9 @@ export async function runPhysicsQA(opt) {
             check(true, `Model worked replay ${m + 1} ${label}`, JSON.stringify(lines));
           });
           const exercises = page.locator(selectors.exercise), exerciseCount = await exercises.count();
-          check(exerciseCount > 0, `Exercise present ${label}`, `${exerciseCount} exercises`);
+          const configs=await page.locator('.ph-data').evaluateAll(nodes=>nodes.map(n=>{try{return JSON.parse(n.textContent)}catch{return {}}}));
+          const qualitativeOnly=configs.length>0&&configs.every(c=>c.schema==='egtry-physics-real/1'&&!c.exercise&&typeof c.noExerciseReason==='string'&&c.noExerciseReason.trim());
+          check(exerciseCount > 0 || qualitativeOnly, `Exercise present ${label}`, qualitativeOnly?`Explicit qualitative reason: ${configs.map(c=>c.noExerciseReason).join('; ')}`:`${exerciseCount} exercises`);
           for (let e = 0; e < exerciseCount; e++) await attempt(`Exercise ${e + 1} ${label}`, async () => {
             const ex = exercises.nth(e), input = ex.locator(selectors.input).first();
             const problem = () => ex.locator(selectors.problem).first().innerText();
@@ -267,6 +277,7 @@ export async function runPhysicsQA(opt) {
     await context.close();
   } catch (e) { check(false, 'Suite execution', e.stack || e.message); }
   finally { if (browser) await browser.close(); }
+  report.realWidgetCount=realWidgetCount;if(opt['require-real']==='true')check(realWidgetCount>0,'Real extension coverage',`${realWidgetCount} recorded widget visits`);
   report.maxConcurrentPages=maxConcurrentPages;
   report.passed = report.checks.filter(c => c.status === 'PASS').length;
   report.failed = report.checks.filter(c => c.status === 'FAIL').length;
