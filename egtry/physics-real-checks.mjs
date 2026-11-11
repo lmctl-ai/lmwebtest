@@ -6,6 +6,12 @@ import {canvasPixels,perceptible} from './physics-checks.mjs';
 const require=(ok,message)=>{if(!ok)throw Error(message);};
 const equal=(a,b,message)=>require(canonical(a)===canonical(b),message);
 const fmt=n=>Number(n.toPrecision(10)).toString();
+export function visibleProvenance(data,run,shown){
+ const expected={scenario:data.scenario,tool:data.tool,parameters:run.input,media:run.media,parameterUnits:run.inputUnits,workflow:data.workflow,validation:run.checks,decimation:run.decimation};
+ if(run.basicNormalization||Object.hasOwn(shown,'basicModel'))expected.basicModel=run.basic??data.basic;
+ if(run.basicNormalization)expected.basicNormalization=run.basicNormalization;
+ return expected;
+}
 export function referenceRows(run,basic,state){
  const axis=run.axis??{key:'t',kind:'time',unit:'s'};
  return run.samples.map(s=>({...(axis.kind==='static'?{}:{[axis.key]:s[axis.key]}),...state(basic,axis.kind==='static'?0:s[axis.key])}));
@@ -55,7 +61,7 @@ export async function checkRealThing(model,{page,request,book,root,toolRepo,bina
  if(await footer.getAttribute('open')===null)await footer.locator('summary').click();require(await perceptible(footer.locator('pre')),'Provenance footer is hidden');require(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Opened provenance footer causes horizontal overflow');
  const basicModule=await import(pathToFileURL(path.join(root,'web/physics/real/basic.js')).href);let varied=false;const signatures=[],runEvidence=[];
  for(let ri=0;ri<data.runs.length;ri++){
-  await select.selectOption(String(ri));const run=data.runs[ri];equal(JSON.parse(await footer.locator('pre').innerText()),{scenario:data.scenario,tool:data.tool,parameters:run.input,media:run.media,parameterUnits:run.inputUnits,workflow:data.workflow,validation:run.checks,decimation:run.decimation},'Visible provenance differs from recorded asset');
+  await select.selectOption(String(ri));const run=data.runs[ri];const shown=JSON.parse(await footer.locator('pre').innerText());equal(shown,visibleProvenance(data,run,shown),'Visible provenance differs from recorded asset');
   if(run.media){
    const video=model.getByLabel('Recorded lmvideo clip',{exact:true});require(await perceptible(video),'Recorded clip is hidden');
    const mediaBase=new URL('../',url);require(await video.getAttribute('src')===new URL(run.media.clip,mediaBase).href,'Clip selector does not match recorded run');require(await video.getAttribute('poster')===new URL(run.media.poster,mediaBase).href,'Poster selector does not match recorded run');
