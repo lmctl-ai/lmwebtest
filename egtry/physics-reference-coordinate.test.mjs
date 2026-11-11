@@ -21,3 +21,16 @@ test('older unnormalized footers remain valid and supplied basic-model details a
  const data={scenario:{file:'actual.json'},tool:{name:'physim'}},run={input:{},checks:[],decimation:{indices:[0]},basic:{model:'linear'}};
  assert.equal(Object.hasOwn(visibleProvenance(data,run,{}),'basicModel'),false);assert.deepEqual(visibleProvenance(data,run,{basicModel:{model:'incorrect'}}).basicModel,run.basic);
 });
+
+import {recordedSeekReached} from './physics-real-checks.mjs';
+test('seek verifies the declared space/frequency coordinate and keeps time separate',()=>{
+ for(const [key,kind,last] of [['y','space',9.5],['frequency','frequency',32],['t','time',500]]){
+  const run={axis:{key,kind},samples:[{[key]:0},{[key]:last}]},attribute=kind==='time'?'data-time':'data-coordinate';
+  assert.equal(recordedSeekReached(run,'1',{[attribute]:String(last)}),true);
+  assert.equal(recordedSeekReached(run,'0',{[attribute]:String(last)}),false);
+  assert.equal(recordedSeekReached(run,'1',{[attribute]:String(last+1)}),false);
+  assert.equal(recordedSeekReached(run,'1',{[kind==='time'?'data-coordinate':'data-time']:String(last)}),false);
+ }
+ assert.equal(recordedSeekReached({axis:{kind:'static'},samples:[{mean:8}]},'0',{}),true);
+ assert.equal(recordedSeekReached({axis:{kind:'space',key:'y'},samples:[{y:-1},{y:0}]},'1',{'data-coordinate':null}),false);
+});

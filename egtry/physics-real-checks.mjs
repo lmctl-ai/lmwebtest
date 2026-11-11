@@ -24,6 +24,13 @@ export function referenceGeometry(view,run,baseline){
  const all=[...run.samples,...baseline].filter(valid);
  return {view:{...view,bounds:{xmin:Math.min(...all.map(s=>s[x])),xmax:Math.max(...all.map(s=>s[x])),ymin:Math.min(...all.map(s=>s[y])),ymax:Math.max(...all.map(s=>s[y]))}},reference:true};
 }
+export function recordedSeekReached(run,index,attributes){
+ const axis=run.axis??{key:'t',kind:'time',unit:'s'},last=run.samples.length-1;
+ if(Number(index)!==last)return false;
+ if(axis.kind==='static')return true;
+ const value=attributes[axis.kind==='time'?'data-time':'data-coordinate'];
+ return value!==null&&value!==undefined&&value!==''&&Number(value)===run.samples[last][axis.key];
+}
 export async function installRealCanvasProbe(page){await page.addInitScript(()=>{
  const proto=CanvasRenderingContext2D.prototype,fill=proto.fillRect,text=proto.fillText;
  proto.fillRect=function(x,y,w,h){if(x===0&&y===0&&w>=this.canvas.width&&h>=this.canvas.height)this.canvas.__physicsQaLabels=[];return fill.apply(this,arguments);};
@@ -77,7 +84,7 @@ export async function checkRealThing(model,{page,request,book,root,toolRepo,bina
    const meta=await video.evaluate(v=>({width:v.videoWidth,height:v.videoHeight,duration:v.duration}));require(meta.width>0&&meta.height>0&&Math.abs(meta.duration-run.media.playbackDurationS)<.1,'Decoded clip disagrees with replay duration');
   }
   const comparison=comparisonContract(config,!!(run.basic??data.basic));const baseline=comparison==='overlay'?referenceRows(run,run.basic??data.basic,basicModule.basicState):[];
-  const axis=run.axis??{key:'t',kind:'time',unit:'s'},last=run.samples.length-1;await seek.press('End');require(Number(await seek.inputValue())===last&&(axis.kind==='static'||Number(await model.getAttribute('data-time'))===run.samples[last][axis.key]),'Seek did not reach the recorded time');
+  const axis=run.axis??{key:'t',kind:'time',unit:'s'},last=run.samples.length-1;await seek.press('End');require(recordedSeekReached(run,await seek.inputValue(),{'data-time':await model.getAttribute('data-time'),'data-coordinate':await model.getAttribute('data-coordinate')}),'Seek did not reach the recorded coordinate');
   const text=await measurement.innerText();for(const [key,meta]of Object.entries(run.columns))require(text.includes(`${key} = ${fmt(run.samples[last][key])} ${meta.unit}`),'Readout differs from saved sample: '+key);
   const signature=canonical(run.samples.map(({t,...values})=>values));if(signatures.length&&signature!==signatures[0])varied=true;signatures.push(signature);
   const plots=[];let comparisons=0;const expectedView=v=>referenceGeometry(v,run,baseline).view;
@@ -90,7 +97,7 @@ export async function checkRealThing(model,{page,request,book,root,toolRepo,bina
   if(comparison==='overlay')require(comparisons>0,'Missing visible basic-model comparison view');else require(await canvases.nth(1).isHidden(),'An analytic-only comparison must not show an unverified baseline canvas');
   await viewSelect.selectOption('0');await model.locator('[data-action=reset]').click();
   if(axis.kind==='time'&&run.samples.length>1){const play=model.locator('[data-action=play]');await play.click();await page.waitForFunction(([el,t])=>Number(el.dataset.time)>t||el.dataset.playing==='false',[await model.elementHandle(),run.samples[0].t],{timeout:4000});require(Number(await model.getAttribute('data-time'))>run.samples[0].t,'Play never advances stored data; adjust the replay time scale');if(await model.getAttribute('data-playing')==='true')await play.click();const currentIndex=Number(await seek.inputValue());await assertPlot(canvases.first(),expectedView(config.views[0]),run.samples,currentIndex,run.columns,run.bodies??run.field);const before=await canvasPixels(canvases.first());await page.waitForTimeout(150);require((await canvasPixels(canvases.first())).hash===before.hash,'Paused recorded data keeps animating');await seek.press('Home');await model.locator('[data-action=step]').first().click();require(Number(await seek.inputValue())===1,'Step does not advance exactly one stored sample');}
-  const steps=await replay(model);if(comparison==='analytic')checkAnalyticSteps(config,steps);require(steps.length>=3,'Missing worked basic/real comparison');runEvidence.push({label:run.label,comparison,plots,steps,axis,seek:true,playPauseStep:axis.kind==='time'&&run.samples.length>1});
+  const steps=await replay(model);if(comparison==='analytic')checkAnalyticSteps(config,steps);require(steps.length>=3,'Missing worked basic/real comparison');runEvidence.push({label:run.label,comparison,analyticComparison:comparison==='analytic'?config.analyticComparison:undefined,plots,steps,axis,seek:true,playPauseStep:axis.kind==='time'&&run.samples.length>1});
  }
  if(data.runs.length>1)require(varied,'Recorded run switching does not change physical values');else require(data.runs[0].samples.length>1||config.views.length>1,'A single stationary run has no meaningful interaction');
  return {asset:url.pathname,assetSha256:hash,budget,replay:replayEvidence,runs:runEvidence,hasExercise:!!config.exercise,qualitativeReason:config.noExerciseReason??null};
