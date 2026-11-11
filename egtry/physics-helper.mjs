@@ -68,10 +68,10 @@ export async function runPhysicsQA(opt) {
   const hashFile = async file => createHash('sha256').update(await fs.readFile(file)).digest('hex');
   const helperSha256 = await hashFile(fileURLToPath(import.meta.url));
   const checksSha256 = await hashFile(new URL('./physics-checks.mjs', import.meta.url));
-  const realChecksSha256=await hashFile(new URL('./physics-real-checks.mjs',import.meta.url)),replaySha256=await hashFile(new URL('./physics-replay.mjs',import.meta.url)),lmvideoChecksSha256=await hashFile(new URL('./physics-lmvideo-script.mjs',import.meta.url));
+  const realChecksSha256=await hashFile(new URL('./physics-real-checks.mjs',import.meta.url)),replaySha256=await hashFile(new URL('./physics-replay.mjs',import.meta.url)),lmvideoChecksSha256=await hashFile(new URL('./physics-lmvideo-script.mjs',import.meta.url)),comparisonSha256=await hashFile(new URL('./physics-comparison.mjs',import.meta.url));
   const scenarioSource = opt.scenarios ? {file: opt.scenarios, sha256: await hashFile(opt.scenarios), families: Object.keys(scenarios)} : null;
   const realCache=new Map();let realWidgetCount=0;
-  const report = { referencePolicy: planned ? 'new-book-inventory' : 'live-legacy-index', scientificReview: 'NOT PERFORMED', workers:workerCount, helperSha256, checksSha256, realChecksSha256, replaySha256, lmvideoChecksSha256, scenarioSource, suite: 'egtry-physics', timestamp: new Date().toISOString(), book: opt.book, host: base, legacy, seed: opt.seed, checks: [], legacySlugs: [], targetSlugs: [], testedSlugs: [] };
+  const report = { referencePolicy: planned ? 'new-book-inventory' : 'live-legacy-index', scientificReview: 'NOT PERFORMED', workers:workerCount, helperSha256, checksSha256, realChecksSha256, replaySha256, lmvideoChecksSha256, comparisonSha256, scenarioSource, suite: 'egtry-physics', timestamp: new Date().toISOString(), book: opt.book, host: base, legacy, seed: opt.seed, checks: [], legacySlugs: [], targetSlugs: [], testedSlugs: [] };
   const dir = opt['out-dir'] || path.join(path.dirname(fileURLToPath(import.meta.url)), 'work');
   await fs.mkdir(dir, {recursive:true});
   const progressPath = path.join(dir, `physics_progress_${opt.book}.json`);
