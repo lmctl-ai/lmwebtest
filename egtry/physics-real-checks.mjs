@@ -40,6 +40,8 @@ async function assertPlot(canvas,view,samples,index,columns,geometry){
   return {kind:view.kind,tested,labels};
  },{view,samples,index,columns,geometry});require(!evidence.error,JSON.stringify(evidence));return {...pixels,...evidence};
 }
+// Match the widget's optional metadata while checking every visible field exactly.
+export function recordedProvenance(data,run){return JSON.parse(JSON.stringify({scenario:data.scenario,tool:data.tool,parameters:run.input,parameterUnits:run.inputUnits,workflow:data.workflow,validation:run.checks,decimation:run.decimation}));}
 export async function checkRealThing(model,{page,request,book,root,toolRepo,binary,lmvideoRepo,lmvideoBinary,replay,cache=new Map()}={}){
  require(root,'R43 replay requires --content-root pointing to reviewed source');
  const config=await model.evaluate(el=>JSON.parse(el.closest('.ph').querySelector('.ph-data').textContent));require(config.schema==='egtry-physics-real/1','Unknown real widget schema');require(/^real\/[-\w]+\.json$/.test(config.asset??''),'Unsafe real data asset path');
@@ -50,7 +52,7 @@ export async function checkRealThing(model,{page,request,book,root,toolRepo,bina
  if(await footer.getAttribute('open')===null)await footer.locator('summary').click();require(await perceptible(footer.locator('pre')),'Provenance footer is hidden');require(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Opened provenance footer causes horizontal overflow');
  const basicModule=await import(pathToFileURL(path.join(root,'web/physics/real/basic.js')).href);let varied=false;const signatures=[],runEvidence=[];
  for(let ri=0;ri<data.runs.length;ri++){
-  await select.selectOption(String(ri));const run=data.runs[ri];equal(JSON.parse(await footer.locator('pre').innerText()),{scenario:data.scenario,tool:data.tool,parameters:run.input,validation:run.checks,decimation:run.decimation},'Visible provenance differs from recorded asset');
+  await select.selectOption(String(ri));const run=data.runs[ri];equal(JSON.parse(await footer.locator('pre').innerText()),recordedProvenance(data,run),'Visible provenance differs from recorded asset');
   require(run.basic??data.basic,'Missing basic-model overlay');const baseline=run.samples.map(s=>({t:s.t,...basicModule.basicState(run.basic??data.basic,s.t)}));
   const axis=run.axis??{key:'t',kind:'time',unit:'s'},last=run.samples.length-1;await seek.press('End');require(Number(await seek.inputValue())===last&&(axis.kind==='static'||Number(await model.getAttribute('data-time'))===run.samples[last][axis.key]),'Seek did not reach the recorded time');
   const text=await measurement.innerText();for(const [key,meta]of Object.entries(run.columns))require(text.includes(`${key} = ${fmt(run.samples[last][key])} ${meta.unit}`),'Readout differs from saved sample: '+key);
