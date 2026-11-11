@@ -15,3 +15,10 @@ test('unmapped quantities and rigid geometry do not demand a fictitious basic cu
 });
 
 test('declared same-coordinate reference columns share exact plot bounds without claiming a baseline canvas',()=>{const run={samples:[{t:0,x:3,ref:10},{t:1,x:5,ref:-2}]};const g=referenceGeometry({kind:'series',x:'t',y:'x',compare:'ref'},run,[]);assert.equal(g.reference,false);assert.deepEqual(g.view.bounds,{xmin:0,xmax:1,ymin:-2,ymax:10});});
+
+test('recorded and basic field plots use identical geometry and color bounds',()=>{
+ const run={field:{nx:2,ny:2},samples:[{field:[1,2,3,4]}]},baseline=[{field:[0,0,0,0]}];
+ const auto=referenceGeometry({kind:'field'},run,baseline);assert.equal(auto.reference,true);assert.equal(auto.view.min,0);assert.equal(auto.view.max,4);
+ const fixed=referenceGeometry({kind:'field',min:-2,max:2},run,baseline);assert.equal(fixed.view.min,-2);assert.equal(fixed.view.max,2);
+ assert.equal(referenceGeometry({kind:'field'},run,[{field:[0]}]).reference,false);
+});
