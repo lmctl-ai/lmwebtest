@@ -39,3 +39,13 @@ test('reviewed projections are recomputed from native output and retain exact li
   const lineage=structuredClone(f.data);lineage.runs[0].decimation.projection.sourceIndices[1]=[1];await assert.rejects(verifyRecordedRuns(lineage,f.recipe,options),/Projection lineage/);
  }finally{await f.dispose();}
 });
+
+test('field cell mutation with a recomputed checksum still fails actual-output comparison',async()=>{
+ const f=await makeReplayFixture();try{
+  const file=path.join(f.root,f.recipe.validator);await fs.appendFile(file,`export const project=({raw})=>({method:'Explicit fixture field from raw x',rows:raw.samples.map(s=>({...s,values:[s.x,2*s.x]})),sourceIndices:raw.samples.map((s,i)=>[i])});\n`);f.data.validator.sha256=digest(await fs.readFile(file));f.recipe.field={source:'values',nx:2,ny:1,unit:'m'};
+  for(const r of f.data.runs){r.samples=r.samples.map(s=>({...s,field:[s.x,2*s.x]}));r.field={nx:2,ny:1,unit:'m'};r.decimation.projection={method:'Explicit fixture field from raw x',sourceCount:3,sourceIndices:[[0],[2]]};}
+  const options={root:f.root,toolRepo:f.toolRepo,binary:f.binary};assert.equal((await verifyRecordedRuns(f.data,f.recipe,options)).status,'PASS');
+  const {verifyMutationRejected}=await import('./physics-replay.mjs'),mutations=await verifyMutationRejected(f.data,f.recipe,options);assert.ok(mutations.some(m=>m.path.endsWith('field.0')&&m.updatedSampleChecksum));
+  f.data.runs[0].samples[0].field[0]++;f.data.runs[0].samplesSha256=digest(JSON.stringify(f.data.runs[0].samples));await assert.rejects(verifyRecordedRuns(f.data,f.recipe,options),/Published numeric samples/);
+ }finally{await f.dispose();}
+});
