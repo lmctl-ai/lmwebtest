@@ -22,7 +22,7 @@ export function referenceGeometry(view,run,baseline){
  const reference=!['rigid','field'].includes(view.kind)&&baseline.some(valid);
  if(!reference){if(view.compare){const all=[...run.samples,...run.samples.map(s=>({...s,[y]:s[view.compare]}))];return{view:{...view,bounds:{xmin:Math.min(...all.map(s=>s[x])),xmax:Math.max(...all.map(s=>s[x])),ymin:Math.min(...all.map(s=>s[y])),ymax:Math.max(...all.map(s=>s[y]))}},reference:false};}return {view:{...view},reference:false};}
  const all=[...run.samples,...baseline].filter(valid);
- return {view:{...view,bounds:{xmin:Math.min(...all.map(s=>s[x])),xmax:Math.max(...all.map(s=>s[x])),ymin:Math.min(...all.map(s=>s[y])),ymax:Math.max(...all.map(s=>s[y]))}},reference:true};
+ return {view:{...view,bounds:{xmin:Math.min(...all.map(s=>s[x])),xmax:Math.max(...all.map(s=>s[x])),ymin:Math.min(...all.map(s=>s[y])),ymax:Math.max(...all.map(s=>s[y])),...view.bounds}},reference:true};
 }
 export function recordedSeekReached(run,index,attributes){
  const axis=run.axis??{key:'t',kind:'time',unit:'s'},last=run.samples.length-1;
@@ -69,7 +69,7 @@ export async function assertPlot(canvas,view,samples,index,columns,geometry){
   const xmin=view.bounds?.xmin??Math.min(...xs),xmax=view.bounds?.xmax??Math.max(...xs),ymin=view.bounds?.ymin??Math.min(...ys),ymax=view.bounds?.ymax??Math.max(...ys),px=x=>60+(x-xmin)/(xmax-xmin||1)*(el.width-70),py=y=>245-(y-ymin)/(ymax-ymin||1)*190;
   if((Number.isFinite(s[xkey])&&Number.isFinite(s[ykey])||!view.reference)&&!near(px(s[xkey]),py(s[ykey]),[[177,91,34]]))return {error:'Current recorded point is not plotted at its data coordinates'};
   let tested=0;for(let i=0;i<points.length;i+=Math.max(1,Math.floor(points.length/16))){if(!near(px(xs[i]),py(ys[i]),[[33,104,149],[177,91,34]]))return {error:'Recorded curve does not pass through its saved sample',sample:i};tested++;}
-  if(view.compare){for(let i=0;i<samples.length;i+=Math.max(1,Math.floor(samples.length/16)))if(!near(px(xs[i]),py(samples[i][view.compare]),[[177,91,34]]))return {error:'Recorded comparison curve differs from its saved source column',sample:i,column:view.compare};}
+  if(view.compare){for(let i=0;i<samples.length;i+=Math.max(1,Math.floor(samples.length/16)))if(!near(px(xs[i]),py(samples[i][view.compare]),[[177,91,34],[33,104,149]]))return {error:'Recorded comparison curve differs from its saved source column',sample:i,column:view.compare};}
   for(const [k,lo,hi] of [[xkey,xmin,xmax],[ykey,ymin,ymax]])if(!labels.some(text=>text.includes(`${k} (${columns[k].unit})`)&&text.includes(fmt(lo))&&text.includes(fmt(hi))))return {error:'Plotted axis labels disagree with saved quantities/units',channel:k,labels};
   let overlay;
   if(view.overlay){let candidates=0,visible=0;for(const p of view.overlay){const x=px(p[xkey]),y=py(p[ykey]);if(!Number.isFinite(x+y))continue;let distance=Infinity;for(let i=1;i<samples.length;i++){const ax=px(samples[i-1][xkey]),ay=py(samples[i-1][ykey]),bx=px(samples[i][xkey]),by=py(samples[i][ykey]),dx=bx-ax,dy=by-ay,u=Math.max(0,Math.min(1,((x-ax)*dx+(y-ay)*dy)/(dx*dx+dy*dy||1)));distance=Math.min(distance,Math.hypot(x-ax-u*dx,y-ay-u*dy));}if(distance<18)continue;candidates++;if(near(x,y,[[177,91,34]],6,48))visible++;}if(candidates&&!visible)return {error:'Basic-model dashed overlay is missing from recorded plot'};overlay={candidates,visible,indistinguishable:candidates===0};}

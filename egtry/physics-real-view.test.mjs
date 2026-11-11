@@ -14,3 +14,8 @@ test('a frequency scan reaches its actual coordinate without requiring a physica
  assert.equal(recordedSeekReached(run,1,{'data-coordinate':'999'}),false);
  assert.equal(recordedSeekReached(run,0,{'data-coordinate':'12.5'}),false);
 });
+
+test('an authored variance scale applies equally to the basic and recorded plots',()=>{
+ const view={x:'t',y:'variance',bounds:{xmin:0,xmax:2,ymin:0,ymax:.25}},run={samples:[{t:0,variance:0},{t:2,variance:1e-14}]},baseline=[{t:0,variance:0},{t:2,variance:0}];
+ assert.deepEqual(referenceGeometry(view,run,baseline).view.bounds,view.bounds);
+});
