@@ -362,6 +362,20 @@ from the recorded tool version. The CLI path is `LMVIDEO_BIN` or the tool repo's
 must match. The fixture video regression requires local `ffmpeg` and Chrome;
 its generated video is synthetic QA test input, never physical evidence.
 
+Clip UI checks bind the selected video/poster URLs and bytes to the replayed
+asset, verify nonblank decoded frames, advancing playback, two actual seek
+positions, visible native controls and a stable paused frame. Perceptible frame
+changes are required; a static clip with codec noise fails. Reference-curve
+probes cover the drawn polyline, including thin antialiased horizontal curves,
+and reject a missing curve or a wrong line that merely meets one endpoint.
+Run the positive and adversarial browser regressions under the shared gate:
+
+```sh
+bash browser-lock.sh /tmp/browser-gate.lock node --test --test-concurrency=1 \
+  physics-real-checks.test.mjs physics-media.test.mjs
+```
+
+
 The R43 acceptance request explicitly requires a plotted basic-model reference.
 The shared `analyticComparison` contract retains scientific worked text, which
 is audited separately. A real widget with analytic text and no tested basic
