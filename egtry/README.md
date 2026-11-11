@@ -349,3 +349,15 @@ node physics-real-book.mjs --root /path/to/interp-docs --book mechanics \
 `physics-real-book.mjs` replays every book asset before Chrome. Both entrypoints accept `--physim-repo`, `--physim-bin`, `--lmvideo-repo`, and `--lmvideo-bin`. The native lmvideo adapter invokes the pinned World/PhysicsTake CPU exporter directly, reconstructs its input independently and compares every scalar and all seven pose coordinates. Its default binary is `/tmp/r43-lmvideo-native/egtry_rigid_export`; build the native exporter from reviewed `scripts/physics/native/` when absent. The executable hash and clean lmvideo source commit must match the asset.
 
 Every replay gate injects numeric mutations (scalar, field cell, rigid pose when present), updates the sample checksum, and demands rejection by the independent numeric comparison. Fixture tests include a deliberately disabled comparison to ensure this guard cannot silently stop working. Browser fixtures reject forged/hidden provenance, hidden basic overlays, frozen markers, wrong axis labels, broken seeking/stepping, overflow and edited served/source assets. These fixture runs are explicitly synthetic tests of QA code; they do not establish physical correctness.
+
+Rendered CLI clips from the pinned upstream `contact-sweep` and `impact-rings`
+scenes use `physics-lmvideo-script.mjs`. It reconstructs the upstream scene and
+probe script from declared parameters (it does not execute an asset's embedded
+script), runs the actual lmvideo host through the recorded LMScript compiler,
+and compares all readbacks, MP4 bytes and poster bytes. Other script scene shapes
+fail until a reviewed adapter is added. `--lmvideo-bin` selects this host for CLI
+assets, or the native exporter for PhysicsTake assets; the default is selected
+from the recorded tool version. The CLI path is `LMVIDEO_BIN` or the tool repo's
+`build/lmvideo`. The host, compiler version, clean tool commit and scenario hash
+must match. The fixture video regression requires local `ffmpeg` and Chrome;
+its generated video is synthetic QA test input, never physical evidence.

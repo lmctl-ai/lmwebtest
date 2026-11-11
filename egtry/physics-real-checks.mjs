@@ -1,3 +1,4 @@
+import{comparisonContract,checkAnalyticSteps}from'./physics-comparison.mjs';
 // R43 checks extend the basic-lesson checks; replay is mandatory, never a skipped PASS.
 import fs from 'node:fs/promises';import path from 'node:path';import {pathToFileURL} from 'node:url';
 import {verifyRecordedRuns,verifyMutationRejected,discoverRecipe,canonical,digest} from './physics-replay.mjs';
@@ -5,6 +6,16 @@ import {canvasPixels,perceptible} from './physics-checks.mjs';
 const require=(ok,message)=>{if(!ok)throw Error(message);};
 const equal=(a,b,message)=>require(canonical(a)===canonical(b),message);
 const fmt=n=>Number(n.toPrecision(10)).toString();
+export function visibleProvenance(data,run,shown){
+ const expected={scenario:data.scenario,tool:data.tool,parameters:run.input,media:run.media,parameterUnits:run.inputUnits,workflow:data.workflow,validation:run.checks,decimation:run.decimation};
+ if(run.basicNormalization||Object.hasOwn(shown,'basicModel'))expected.basicModel=run.basic??data.basic;
+ if(run.basicNormalization)expected.basicNormalization=run.basicNormalization;
+ return expected;
+}
+export function referenceRows(run,basic,state){
+ const axis=run.axis??{key:'t',kind:'time',unit:'s'};
+ return run.samples.map(s=>({...(axis.kind==='static'?{}:{[axis.key]:s[axis.key]}),...state(basic,axis.kind==='static'?0:s[axis.key])}));
+}
 export async function installRealCanvasProbe(page){await page.addInitScript(()=>{
  const proto=CanvasRenderingContext2D.prototype,fill=proto.fillRect,text=proto.fillText;
  proto.fillRect=function(x,y,w,h){if(x===0&&y===0&&w>=this.canvas.width&&h>=this.canvas.height)this.canvas.__physicsQaLabels=[];return fill.apply(this,arguments);};
@@ -40,8 +51,6 @@ async function assertPlot(canvas,view,samples,index,columns,geometry){
   return {kind:view.kind,tested,labels};
  },{view,samples,index,columns,geometry});require(!evidence.error,JSON.stringify(evidence));return {...pixels,...evidence};
 }
-// Match the widget's optional metadata while checking every visible field exactly.
-export function recordedProvenance(data,run){return JSON.parse(JSON.stringify({scenario:data.scenario,tool:data.tool,parameters:run.input,parameterUnits:run.inputUnits,workflow:data.workflow,validation:run.checks,decimation:run.decimation}));}
 export async function checkRealThing(model,{page,request,book,root,toolRepo,binary,lmvideoRepo,lmvideoBinary,replay,cache=new Map()}={}){
  require(root,'R43 replay requires --content-root pointing to reviewed source');
  const config=await model.evaluate(el=>JSON.parse(el.closest('.ph').querySelector('.ph-data').textContent));require(config.schema==='egtry-physics-real/1','Unknown real widget schema');require(/^real\/[-\w]+\.json$/.test(config.asset??''),'Unsafe real data asset path');
@@ -52,15 +61,21 @@ export async function checkRealThing(model,{page,request,book,root,toolRepo,bina
  if(await footer.getAttribute('open')===null)await footer.locator('summary').click();require(await perceptible(footer.locator('pre')),'Provenance footer is hidden');require(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Opened provenance footer causes horizontal overflow');
  const basicModule=await import(pathToFileURL(path.join(root,'web/physics/real/basic.js')).href);let varied=false;const signatures=[],runEvidence=[];
  for(let ri=0;ri<data.runs.length;ri++){
-  await select.selectOption(String(ri));const run=data.runs[ri];equal(JSON.parse(await footer.locator('pre').innerText()),recordedProvenance(data,run),'Visible provenance differs from recorded asset');
-  require(run.basic??data.basic,'Missing basic-model overlay');const baseline=run.samples.map(s=>({t:s.t,...basicModule.basicState(run.basic??data.basic,s.t)}));
+  await select.selectOption(String(ri));const run=data.runs[ri];const shown=JSON.parse(await footer.locator('pre').innerText());equal(shown,visibleProvenance(data,run,shown),'Visible provenance differs from recorded asset');
+  if(run.media){
+   const video=model.getByLabel('Recorded lmvideo clip',{exact:true});require(await perceptible(video),'Recorded clip is hidden');
+   const mediaBase=new URL('../',url);require(await video.getAttribute('src')===new URL(run.media.clip,mediaBase).href,'Clip selector does not match recorded run');require(await video.getAttribute('poster')===new URL(run.media.poster,mediaBase).href,'Poster selector does not match recorded run');
+   await video.evaluate(v=>new Promise((resolve,reject)=>{if(v.readyState>=2)return resolve();v.addEventListener('loadeddata',resolve,{once:true});v.addEventListener('error',()=>reject(Error('Recorded clip failed to decode')),{once:true});v.load();}));
+   const meta=await video.evaluate(v=>({width:v.videoWidth,height:v.videoHeight,duration:v.duration}));require(meta.width>0&&meta.height>0&&Math.abs(meta.duration-run.media.playbackDurationS)<.1,'Decoded clip disagrees with replay duration');
+  }
+  const comparison=comparisonContract(config,!!(run.basic??data.basic));const baseline=comparison==='overlay'?referenceRows(run,run.basic??data.basic,basicModule.basicState):[];
   const axis=run.axis??{key:'t',kind:'time',unit:'s'},last=run.samples.length-1;await seek.press('End');require(Number(await seek.inputValue())===last&&(axis.kind==='static'||Number(await model.getAttribute('data-time'))===run.samples[last][axis.key]),'Seek did not reach the recorded time');
   const text=await measurement.innerText();for(const [key,meta]of Object.entries(run.columns))require(text.includes(`${key} = ${fmt(run.samples[last][key])} ${meta.unit}`),'Readout differs from saved sample: '+key);
   const signature=canonical(run.samples.map(({t,...values})=>values));if(signatures.length&&signature!==signatures[0])varied=true;signatures.push(signature);
-  const plots=[];let comparisons=0;const expectedView=v=>{const view={...v};if(!['rigid','field'].includes(view.kind)){const all=[...run.samples,...baseline],x=view.x??'t',y=view.y;view.bounds={xmin:Math.min(...all.map(s=>s[x])),xmax:Math.max(...all.map(s=>s[x])),ymin:Math.min(...all.map(s=>s[y])),ymax:Math.max(...all.map(s=>s[y]))};}return view;};for(let vi=0;vi<config.views.length;vi++){await viewSelect.selectOption(String(vi));const view=expectedView(config.views[vi]),recorded=await assertPlot(canvases.nth(0),view,run.samples,last,run.columns,run.bodies??run.field);let basic;if(view.kind!=='rigid'){basic=await assertPlot(canvases.nth(1),view,baseline,last,run.columns,run.field);comparisons++;}plots.push({recorded,basic});}require(comparisons>0,'Missing visible basic-model comparison view');
+  const plots=[];let comparisons=0;const expectedView=v=>{const view={...v};if(baseline.length&&!['rigid','field'].includes(view.kind)){const all=[...run.samples,...baseline],x=view.x??'t',y=view.y;view.bounds={xmin:Math.min(...all.map(s=>s[x])),xmax:Math.max(...all.map(s=>s[x])),ymin:Math.min(...all.map(s=>s[y])),ymax:Math.max(...all.map(s=>s[y]))};}return view;};for(let vi=0;vi<config.views.length;vi++){await viewSelect.selectOption(String(vi));const view=expectedView(config.views[vi]),recorded=await assertPlot(canvases.nth(0),view,run.samples,last,run.columns,run.bodies??run.field);let basic;if(baseline.length&&view.kind!=='rigid'){basic=await assertPlot(canvases.nth(1),view,baseline,last,run.columns,run.field);comparisons++;}plots.push({recorded,basic});}if(comparison==='overlay')require(comparisons>0,'Missing visible basic-model comparison view');else require(await canvases.nth(1).isHidden(),'An analytic-only comparison must not show an unverified baseline canvas');
   await viewSelect.selectOption('0');await model.locator('[data-action=reset]').click();
   if(axis.kind==='time'&&run.samples.length>1){const play=model.locator('[data-action=play]');await play.click();await page.waitForFunction(([el,t])=>Number(el.dataset.time)>t||el.dataset.playing==='false',[await model.elementHandle(),run.samples[0].t],{timeout:4000});require(Number(await model.getAttribute('data-time'))>run.samples[0].t,'Play never advances stored data; adjust the replay time scale');if(await model.getAttribute('data-playing')==='true')await play.click();const currentIndex=Number(await seek.inputValue());await assertPlot(canvases.first(),expectedView(config.views[0]),run.samples,currentIndex,run.columns,run.bodies??run.field);const before=await canvasPixels(canvases.first());await page.waitForTimeout(150);require((await canvasPixels(canvases.first())).hash===before.hash,'Paused recorded data keeps animating');await seek.press('Home');await model.locator('[data-action=step]').first().click();require(Number(await seek.inputValue())===1,'Step does not advance exactly one stored sample');}
-  const steps=await replay(model);require(steps.length>=3,'Missing worked basic/real comparison');runEvidence.push({label:run.label,plots,steps,axis,seek:true,playPauseStep:axis.kind==='time'&&run.samples.length>1});
+  const steps=await replay(model);if(comparison==='analytic')checkAnalyticSteps(config,steps);require(steps.length>=3,'Missing worked basic/real comparison');runEvidence.push({label:run.label,comparison,plots,steps,axis,seek:true,playPauseStep:axis.kind==='time'&&run.samples.length>1});
  }
  if(data.runs.length>1)require(varied,'Recorded run switching does not change physical values');else require(data.runs[0].samples.length>1||config.views.length>1,'A single stationary run has no meaningful interaction');
  return {asset:url.pathname,assetSha256:hash,budget,replay:replayEvidence,runs:runEvidence,hasExercise:!!config.exercise,qualitativeReason:config.noExerciseReason??null};
