@@ -16,6 +16,13 @@ export function referenceRows(run,basic,state){
  const axis=run.axis??{key:'t',kind:'time',unit:'s'};
  return run.samples.map(s=>({...(axis.kind==='static'?{}:{[axis.key]:s[axis.key]}),...state(basic,axis.kind==='static'?0:s[axis.key])}));
 }
+export function recordedSeekReached(run,index,attributes){
+ const axis=run.axis??{key:'t',kind:'time',unit:'s'},last=run.samples.length-1;
+ if(Number(index)!==last)return false;
+ if(axis.kind==='static')return true;
+ const value=attributes[axis.kind==='time'?'data-time':'data-coordinate'];
+ return value!==null&&value!==undefined&&value!==''&&Number(value)===run.samples[last][axis.key];
+}
 export async function installRealCanvasProbe(page){await page.addInitScript(()=>{
  const proto=CanvasRenderingContext2D.prototype,fill=proto.fillRect,text=proto.fillText;
  proto.fillRect=function(x,y,w,h){if(x===0&&y===0&&w>=this.canvas.width&&h>=this.canvas.height)this.canvas.__physicsQaLabels=[];return fill.apply(this,arguments);};
@@ -69,7 +76,7 @@ export async function checkRealThing(model,{page,request,book,root,toolRepo,bina
    const meta=await video.evaluate(v=>({width:v.videoWidth,height:v.videoHeight,duration:v.duration}));require(meta.width>0&&meta.height>0&&Math.abs(meta.duration-run.media.playbackDurationS)<.1,'Decoded clip disagrees with replay duration');
   }
   const comparison=comparisonContract(config,!!(run.basic??data.basic));const baseline=comparison==='overlay'?referenceRows(run,run.basic??data.basic,basicModule.basicState):[];
-  const axis=run.axis??{key:'t',kind:'time',unit:'s'},last=run.samples.length-1;await seek.press('End');require(Number(await seek.inputValue())===last&&(axis.kind==='static'||Number(await model.getAttribute('data-time'))===run.samples[last][axis.key]),'Seek did not reach the recorded time');
+  const axis=run.axis??{key:'t',kind:'time',unit:'s'},last=run.samples.length-1;await seek.press('End');require(recordedSeekReached(run,await seek.inputValue(),{'data-time':await model.getAttribute('data-time'),'data-coordinate':await model.getAttribute('data-coordinate')}),'Seek did not reach the recorded coordinate');
   const text=await measurement.innerText();for(const [key,meta]of Object.entries(run.columns))require(text.includes(`${key} = ${fmt(run.samples[last][key])} ${meta.unit}`),'Readout differs from saved sample: '+key);
   const signature=canonical(run.samples.map(({t,...values})=>values));if(signatures.length&&signature!==signatures[0])varied=true;signatures.push(signature);
   const plots=[];let comparisons=0;const expectedView=v=>{const view={...v};if(baseline.length&&!['rigid','field'].includes(view.kind)){const all=[...run.samples,...baseline],x=view.x??'t',y=view.y;view.bounds={xmin:Math.min(...all.map(s=>s[x])),xmax:Math.max(...all.map(s=>s[x])),ymin:Math.min(...all.map(s=>s[y])),ymax:Math.max(...all.map(s=>s[y]))};}return view;};for(let vi=0;vi<config.views.length;vi++){await viewSelect.selectOption(String(vi));const view=expectedView(config.views[vi]),recorded=await assertPlot(canvases.nth(0),view,run.samples,last,run.columns,run.bodies??run.field);let basic;if(baseline.length&&view.kind!=='rigid'){basic=await assertPlot(canvases.nth(1),view,baseline,last,run.columns,run.field);comparisons++;}plots.push({recorded,basic});}if(comparison==='overlay')require(comparisons>0,'Missing visible basic-model comparison view');else require(await canvases.nth(1).isHidden(),'An analytic-only comparison must not show an unverified baseline canvas');
