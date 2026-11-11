@@ -63,7 +63,7 @@ export async function assertPlot(canvas,view,samples,index,columns,geometry){
  const pixels=await canvasPixels(canvas);require(pixels.varied>20,'Real/basic plot is blank');
  const evidence=await canvas.evaluate((el,{view,samples,index,columns,geometry})=>{
   const c=el.getContext('2d'),s=samples[index],fmt=n=>Number(n.toPrecision(10)).toString(),labels=el.__physicsQaLabels??[];
-  const near=(x,y,want,radius=3,tolerance=12)=>{for(let dy=-radius;dy<=radius;dy++)for(let dx=-radius;dx<=radius;dx++){const px=Math.round(x+dx),py=Math.round(y+dy);if(px<0||py<0||px>=el.width||py>=el.height)continue;const a=c.getImageData(px,py,1,1).data;if(want.some(rgb=>rgb.every((v,j)=>Math.abs(v-a[j])<tolerance)))return true;}return false;};
+  const near=(x,y,want,radius=3,tolerance=12)=>{for(let dy=-radius;dy<=radius;dy++)for(let dx=-radius;dx<=radius;dx++){const px=Math.round(x+dx),py=Math.round(y+dy);if(px<0||py<0||px>=el.width||py>=el.height)continue;const a=c.getImageData(px,py,1,1).data;if(want==='reference-orange'?(a[0]>a[1]+15&&a[1]>a[2]+12&&a[0]>a[2]+30):want.some(rgb=>rgb.every((v,j)=>Math.abs(v-a[j])<tolerance)))return true;}return false;};
   if(view.kind==='field'){
    const nx=view.nx??geometry?.nx,ny=view.ny??geometry?.ny??1,values=s.field;
    if(!nx||!Array.isArray(values)||values.length!==nx*ny)return {error:'Missing field geometry/data'};if(geometry?.unit&&view.unit!==geometry.unit)return {error:'Field display units disagree with recorded data'};
@@ -83,14 +83,29 @@ export async function assertPlot(canvas,view,samples,index,columns,geometry){
   }
   const xkey=view.x??'t',ykey=view.y,points=samples.filter(s=>Number.isFinite(s[xkey])&&Number.isFinite(s[ykey])),xs=points.map(s=>s[xkey]),ys=points.map(s=>s[ykey]);if(!points.length||(!view.reference&&points.length!==samples.length))return {error:'Plot channels are not finite'};
   const xmin=view.bounds?.xmin??Math.min(...xs),xmax=view.bounds?.xmax??Math.max(...xs),ymin=view.bounds?.ymin??Math.min(...ys),ymax=view.bounds?.ymax??Math.max(...ys),px=x=>60+(x-xmin)/(xmax-xmin||1)*(el.width-70),py=y=>245-(y-ymin)/(ymax-ymin||1)*190;
-  if((Number.isFinite(s[xkey])&&Number.isFinite(s[ykey])||!view.reference)&&!near(px(s[xkey]),py(s[ykey]),[[177,91,34]]))return {error:'Current recorded point is not plotted at its data coordinates'};
+  if((Number.isFinite(s[xkey])&&Number.isFinite(s[ykey])||!view.reference)&&![[0,0],[-3,0],[3,0],[0,-3],[0,3]].every(([dx,dy])=>near(px(s[xkey])+dx,py(s[ykey])+dy,[[177,91,34]],1)))return {error:'Current recorded point is not plotted at its data coordinates'};
   let tested=0;for(let i=0;i<points.length;i+=Math.max(1,Math.floor(points.length/16))){if(!near(px(xs[i]),py(ys[i]),[[33,104,149],[177,91,34]]))return {error:'Recorded curve does not pass through its saved sample',sample:i};tested++;}
   if(view.compare&&!view.reference){for(let i=0;i<samples.length;i+=Math.max(1,Math.floor(samples.length/16)))if(!near(px(xs[i]),py(samples[i][view.compare]),[[123,76,154],[177,91,34],[33,104,149]]))return {error:'Recorded comparison curve differs from its saved source column',sample:i,column:view.compare};}
   let overlay;
-  if(view.overlay){let candidates=0,visible=0;for(const p of view.overlay){const x=px(p[xkey]),y=py(p[ykey]);if(!Number.isFinite(x+y))continue;let distance=Infinity;for(let i=1;i<samples.length;i++){const ax=px(samples[i-1][xkey]),ay=py(samples[i-1][ykey]),bx=px(samples[i][xkey]),by=py(samples[i][ykey]),dx=bx-ax,dy=by-ay,u=Math.max(0,Math.min(1,((x-ax)*dx+(y-ay)*dy)/(dx*dx+dy*dy||1)));distance=Math.min(distance,Math.hypot(x-ax-u*dx,y-ay-u*dy));}if(distance<18)continue;candidates++;if(near(x,y,[[177,91,34]],6,48))visible++;}if(candidates&&!visible)return {error:'Basic-model dashed overlay is missing from recorded plot'};overlay={candidates,visible,indistinguishable:candidates===0};}
+  if(view.overlay){
+   const curve=view.overlay.filter(p=>Number.isFinite(p[xkey])&&Number.isFinite(p[ykey])),real=samples.filter(p=>Number.isFinite(p[xkey])&&Number.isFinite(p[ykey]));let candidates=0,visible=0;
+   for(let n=0;n<(curve.length===1?1:33)&&curve.length;n++){
+    const offset=curve.length===1?0:n*(curve.length-1)/32,i=Math.floor(offset),u=offset-i,a=curve[i],b=curve[Math.min(i+1,curve.length-1)],x=px(a[xkey])*(1-u)+px(b[xkey])*u,y=py(a[ykey])*(1-u)+py(b[ykey])*u;
+    let distance=real.length===1?Math.hypot(x-px(real[0][xkey]),y-py(real[0][ykey])):Infinity;for(let j=1;j<real.length;j++){const ax=px(real[j-1][xkey]),ay=py(real[j-1][ykey]),bx=px(real[j][xkey]),by=py(real[j][ykey]),dx=bx-ax,dy=by-ay,t=Math.max(0,Math.min(1,((x-ax)*dx+(y-ay)*dy)/(dx*dx+dy*dy||1)));distance=Math.min(distance,Math.hypot(x-ax-t*dx,y-ay-t*dy));}
+    if(distance<18)continue;candidates++;if(near(x,y,'reference-orange',6))visible++;
+   }
+   if(candidates&&visible<Math.ceil(.8*candidates))return {error:'Basic-model dashed overlay is missing or differs from its reference curve',candidates,visible};overlay={candidates,visible,indistinguishable:candidates===0};
+  }
   return {kind:view.kind,tested,labels,overlay,axisLabels:[[xkey,columns[xkey].unit,xmin,xmax],[ykey,columns[ykey].unit,ymin,ymax]]};
  },{view,samples,index,columns,geometry});require(!evidence.error,JSON.stringify(evidence));for(const [key,unit,lo,hi] of evidence.axisLabels??[])require(axisLabelMatches(evidence.labels,key,unit,lo,hi),JSON.stringify({error:'Plotted axis labels disagree with saved quantities/units',key,unit,lo,hi,labels:evidence.labels}));return {...pixels,...evidence};
 }
+// Latch an actual pixel change while Play runs, including closed trajectories.
+export async function startPlaybackPixels(canvas){await canvas.evaluate(el=>{
+ const hash=()=>{const bytes=el.getContext('2d').getImageData(0,0,el.width,el.height).data;let h=2166136261;for(let i=0;i<bytes.length;i++)h=Math.imul(h^bytes[i],16777619);return h>>>0;};
+ const probe=el.__physicsQaPlayback={initial:hash(),changed:false,frames:0};
+ const tick=()=>{probe.frames++;probe.latest=hash();if(probe.latest!==probe.initial){probe.changed=true;return;}probe.raf=requestAnimationFrame(tick);};probe.raf=requestAnimationFrame(tick);
+ });}
+export async function stopPlaybackPixels(canvas){return canvas.evaluate(el=>{const p=el.__physicsQaPlayback;if(!p)return null;cancelAnimationFrame(p.raf);delete el.__physicsQaPlayback;return {beforeHash:p.initial,afterHash:p.latest,changed:p.changed,frames:p.frames};});}
 export async function checkRealThing(model,{page,request,book,root,toolRepo,binary,lmvideoRepo,lmvideoBinary,replay,cache=new Map()}={}){
  require(root,'R43 replay requires --content-root pointing to reviewed source');
  const config=await model.evaluate(el=>JSON.parse(el.closest('.ph').querySelector('.ph-data').textContent));require(config.schema==='egtry-physics-real/1','Unknown real widget schema');require(/^real\/[-\w]+\.json$/.test(config.asset??''),'Unsafe real data asset path');
@@ -113,17 +128,26 @@ export async function checkRealThing(model,{page,request,book,root,toolRepo,bina
   if(axis.kind!=='time')require(await model.locator('[data-action=play]').isHidden(),'A non-time scan must not expose physical-time Play');
   const text=await measurement.innerText();for(const [key,meta]of Object.entries(run.columns))require(text.includes(`${key} = ${fmt(run.samples[last][key])} ${meta.unit}`),'Readout differs from saved sample: '+key);
   const signature=canonical(run.samples.map(({t,...values})=>values));if(signatures.length&&signature!==signatures[0])varied=true;signatures.push(signature);
-  const plots=[];let comparisons=0;const expectedView=v=>{const g=referenceGeometry(v,run,baseline);if(g.reference){const x=v.x??'t',y=v.y;g.view.overlay=baseline.filter(s=>Number.isFinite(s[x])&&Number.isFinite(s[y]));}return g.view;};
+  const plots=[];let comparisons=0;const expectedView=v=>{const g=referenceGeometry(v,run,baseline);if(g.reference){const x=v.x??'t',y=v.y;g.view.overlay=g.samples.filter(s=>Number.isFinite(s[x])&&Number.isFinite(s[y]));}return g.view;};
   for(let vi=0;vi<config.views.length;vi++){
    await viewSelect.selectOption(String(vi));const geometry=referenceGeometry(config.views[vi],run,baseline),view=expectedView(config.views[vi]),recorded=await assertPlot(canvases.nth(0),view,run.samples,last,run.columns,run.bodies??run.field);let basic;
-   if(geometry.reference){basic=await assertPlot(canvases.nth(1),{...view,reference:true},geometry.samples,last,run.columns,run.field);comparisons++;}
+   if(geometry.reference){basic=await assertPlot(canvases.nth(1),{...view,reference:true,overlay:undefined},geometry.samples,last,run.columns,run.field);comparisons++;}
    else require(await canvases.nth(1).isHidden(),'A view without a comparable basic quantity must hide its baseline');
-   plots.push({recorded,basic});
+   const seekSamples=[];
+   for(const index of [...new Set([0,Math.floor(last/2),last])]){
+    if(index===last)await seek.press('End');else if(index===0)await seek.press('Home');else await seek.evaluate((el,index)=>{el.value=index;el.dispatchEvent(new Event('input',{bubbles:true}));},index);
+    require(Number(await seek.inputValue())===index,'Seek does not select the requested stored sample');
+    const readout=await measurement.innerText();for(const [key,meta]of Object.entries(run.columns))require(readout.includes(`${key} = ${fmt(run.samples[index][key])} ${meta.unit}`),'Seek readout differs from saved sample: '+key);
+    const frame=await assertPlot(canvases.nth(0),view,run.samples,index,run.columns,run.bodies??run.field);seekSamples.push({index,hash:frame.hash,tested:frame.tested});
+    if(geometry.reference)await assertPlot(canvases.nth(1),{...view,reference:true,overlay:undefined},geometry.samples,index,run.columns,run.field);
+   }
+   plots.push({recorded,basic,seekSamples});
   }
   if(comparison==='overlay')require(comparisons>0,'Missing visible basic-model comparison view');else require(await canvases.nth(1).isHidden(),'An analytic-only comparison must not show an unverified baseline canvas');
   await viewSelect.selectOption('0');await model.locator('[data-action=reset]').click();
-  if(axis.kind==='time'&&run.samples.length>1){const play=model.locator('[data-action=play]');await play.click();await page.waitForFunction(([el,t])=>Number(el.dataset.time)>t||el.dataset.playing==='false',[await model.elementHandle(),run.samples[0].t],{timeout:4000});require(Number(await model.getAttribute('data-time'))>run.samples[0].t,'Play never advances stored data; adjust the replay time scale');if(await model.getAttribute('data-playing')==='true')await play.click();const currentIndex=Number(await seek.inputValue());await assertPlot(canvases.first(),expectedView(config.views[0]),run.samples,currentIndex,run.columns,run.bodies??run.field);const before=await canvasPixels(canvases.first());await page.waitForTimeout(150);require((await canvasPixels(canvases.first())).hash===before.hash,'Paused recorded data keeps animating');await seek.press('Home');await model.locator('[data-action=step]').first().click();require(Number(await seek.inputValue())===1,'Step does not advance exactly one stored sample');}
-  const steps=await replay(model);if(comparison==='analytic')checkAnalyticSteps(config,steps);require(steps.length>=3,'Missing worked basic/real comparison');runEvidence.push({label:run.label,comparison,analyticComparison:comparison==='analytic'?config.analyticComparison:undefined,plots,steps,axis,seek:true,playPauseStep:axis.kind==='time'&&run.samples.length>1});
+  let playbackPixels;
+  if(axis.kind==='time'&&run.samples.length>1){const changingView=new Set(plots[0].seekSamples.map(s=>s.hash)).size>1;if(changingView)await startPlaybackPixels(canvases.first());const play=model.locator('[data-action=play]');await play.click();await page.waitForFunction(([el,t])=>Number(el.dataset.time)>t||el.dataset.playing==='false',[await model.elementHandle(),run.samples[0].t],{timeout:4000});require(Number(await model.getAttribute('data-time'))>run.samples[0].t,'Play never advances stored data; adjust the replay time scale');if(changingView){try{await page.waitForFunction(el=>el.__physicsQaPlayback?.changed,await canvases.first().elementHandle(),{timeout:4000});}finally{playbackPixels=await stopPlaybackPixels(canvases.first());}require(playbackPixels.changed,'Play advances the readout but the recorded canvas stays static');}if(await model.getAttribute('data-playing')==='true')await play.click();const currentIndex=Number(await seek.inputValue());await assertPlot(canvases.first(),expectedView(config.views[0]),run.samples,currentIndex,run.columns,run.bodies??run.field);const before=await canvasPixels(canvases.first());await page.waitForTimeout(150);require((await canvasPixels(canvases.first())).hash===before.hash,'Paused recorded data keeps animating');await seek.press('Home');await model.locator('[data-action=step]').first().click();require(Number(await seek.inputValue())===1,'Step does not advance exactly one stored sample');}
+  const steps=await replay(model);if(comparison==='analytic')checkAnalyticSteps(config,steps);require(steps.length>=3,'Missing worked basic/real comparison');runEvidence.push({label:run.label,comparison,analyticComparison:comparison==='analytic'?config.analyticComparison:undefined,plots,steps,axis,playbackPixels,seek:true,playPauseStep:axis.kind==='time'&&run.samples.length>1});
  }
  if(data.runs.length>1)require(varied,'Recorded run switching does not change physical values');else require(data.runs[0].samples.length>1||config.views.length>1,'A single stationary run has no meaningful interaction');
  return {asset:url.pathname,assetSha256:hash,budget,replay:replayEvidence,runs:runEvidence,hasExercise:!!config.exercise,qualitativeReason:config.noExerciseReason??null};

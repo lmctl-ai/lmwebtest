@@ -367,3 +367,17 @@ The shared `analyticComparison` contract retains scientific worked text, which
 is audited separately. A real widget with analytic text and no tested basic
 plot fails the full suite's **Basic model overlay** check. This prevents the
 analytic-only authoring fallback from silently waiving the requested criterion.
+
+Real-data frame checks now seek every view to the first, middle and last stored
+samples, verify matching readouts and the filled current marker, and latch
+actual pixel changes during Play, including closed trajectories. Thin
+antialiased reference curves must follow their declared polyline; an axis or
+a wrong line meeting one endpoint is insufficient. Run their positive and
+adversarial rendering fixtures under the shared gate:
+
+```sh
+bash browser-lock.sh /tmp/browser-gate.lock node --test --test-concurrency=1 \
+  physics-real-checks.test.mjs physics-animation.test.mjs
+```
+
+Extended decoded-clip playback checks are being verified separately.
