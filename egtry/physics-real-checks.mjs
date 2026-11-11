@@ -43,14 +43,6 @@ export async function realAssetBudget(root,book){
  async function walk(at){for(const e of await fs.readdir(at,{withFileTypes:true})){const file=path.join(at,e.name);require(!e.isSymbolicLink(),'Real assets must not escape through symlinks');if(e.isDirectory())await walk(file);else{require(e.isFile(),'Non-file real asset');bytes+=(await fs.stat(file)).size;files++;}}}
  await walk(dir);require(bytes<=1500000,`Real assets exceed 1,500,000-byte book budget: ${bytes}`);return {bytes,files,limit:1500000};
 }
-export async function recordedCoordinate(model,axis){
- if(axis.kind==='static')return null;const coordinate=await model.getAttribute(axis.kind==='time'?'data-time':'data-coordinate'),legacy=coordinate??await model.getAttribute('data-time');require(typeof legacy==='string'&&legacy.trim()&&Number.isFinite(Number(legacy)),'Missing recorded sampling coordinate');return Number(legacy);
-}
-export function recordedView(view,samples,basic=[]){
- const result={...view};if(['rigid','field'].includes(view.kind))return result;
- const compare=view.compare?samples.map(s=>({...s,[view.y]:s[view.compare]})):basic;
- if(compare.length){const all=[...samples,...compare],x=view.x??'t',y=view.y;result.bounds={xmin:Math.min(...all.map(s=>s[x])),xmax:Math.max(...all.map(s=>s[x])),ymin:Math.min(...all.map(s=>s[y])),ymax:Math.max(...all.map(s=>s[y]))};}return result;
-}
 export async function assertPlot(canvas,view,samples,index,columns,geometry){
  const pixels=await canvasPixels(canvas);require(pixels.varied>20,'Real/basic plot is blank');
  const evidence=await canvas.evaluate((el,{view,samples,index,columns,geometry})=>{
