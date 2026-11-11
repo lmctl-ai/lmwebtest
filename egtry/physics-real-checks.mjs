@@ -18,6 +18,12 @@ export function referenceRows(run,basic,state){
 }
 // A basic approximation may stop before impact or cover only some displayed quantities.
 export function referenceGeometry(view,run,baseline){
+ if(view.kind==='field'){
+  const count=run.field?.nx*(run.field?.ny??1),reference=baseline.length>0&&baseline.every(s=>Array.isArray(s.field)&&s.field.length===count&&s.field.every(Number.isFinite));
+  if(!reference)return {view:{...view},reference:false};
+  const values=[...run.samples,...baseline].flatMap(s=>s.field);
+  return {view:{...view,min:view.min??values.reduce((a,b)=>Math.min(a,b),Infinity),max:view.max??values.reduce((a,b)=>Math.max(a,b),-Infinity)},reference:true};
+ }
  const x=view.x??'t',y=view.y,valid=s=>Number.isFinite(s[x])&&Number.isFinite(s[y]);
  const reference=!['rigid','field'].includes(view.kind)&&baseline.some(valid);
  if(!reference){if(view.compare){const all=[...run.samples,...run.samples.map(s=>({...s,[y]:s[view.compare]}))];return{view:{...view,bounds:{xmin:Math.min(...all.map(s=>s[x])),xmax:Math.max(...all.map(s=>s[x])),ymin:Math.min(...all.map(s=>s[y])),ymax:Math.max(...all.map(s=>s[y]))}},reference:false};}return {view:{...view},reference:false};}
