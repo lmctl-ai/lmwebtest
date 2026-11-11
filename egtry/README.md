@@ -399,3 +399,9 @@ with a bounded tolerance. A seek event that stays at time zero fails. The
 fixture HTTP server supports byte ranges so Chrome can decode the requested
 frames. The clip regression covers positive playback at 1280/390 and rejects
 forged bytes, hidden video/controls and a static encoded clip.
+
+WP01 multi-body host replay retains the validated clip/poster identities and
+encoding metadata in each run proof, after comparing actual render and source
+bytes. The archive gate requires those identities and matching measured browser
+playback/seek receipts. Native scalar totals count the fields actually checked
+(three for mass-only runs, five for energy/trajectory runs).
