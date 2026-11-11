@@ -367,7 +367,7 @@ asset, verify nonblank decoded frames, advancing playback, two actual seek
 positions, visible native controls and a stable paused frame. Perceptible frame
 changes are required; a static clip with codec noise fails. Reference-curve
 probes cover the drawn polyline, including thin antialiased horizontal curves,
-and reject a missing curve or a wrong line that merely meets one endpoint.
+and reject a missing curve or a wrong line that merely meets one endpoint. Every view is also checked at the first, middle and last stored samples, including readouts and a filled marker footprint; a final-frame canvas cannot pass merely because playback reaches the end quickly. During Play, a frame probe latches actual pixel changes even when a closed trajectory ends on its starting image. Stationary recorded views are identified by their verified seek frames, rather than being given invented motion.
 Run the positive and adversarial browser regressions under the shared gate:
 
 ```sh
