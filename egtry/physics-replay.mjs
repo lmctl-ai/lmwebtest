@@ -17,6 +17,7 @@ export async function contained(root,name){require(typeof name==='string'&&!path
 export function finiteTree(value,label='value'){if(typeof value==='number')require(Number.isFinite(value),'Nonfinite '+label);else if(value&&typeof value==='object')for(const [k,v] of Object.entries(value))finiteTree(v,label+'.'+k);}
 export function decimationIndices(count,maximum=161){require(Number.isInteger(count)&&count>=2,'Raw output needs at least two samples');require(Number.isInteger(maximum)&&maximum>=2&&maximum<=512,'maxSamples must be 2..512');const n=Math.min(count,maximum);return Array.from({length:n},(_,i)=>Math.floor(i*(count-1)/(n-1)+.5));}
 export async function verifyRecordedRuns(data,recipe,options={}){
+ if(data?.tool?.name==='lmvideo'&&data.workflow?.kind==='lmvideo-lmscript-host')return verifyHostRuns(data,recipe,options);
  if(data?.tool?.name==='lmvideo'){if(data.tool.version?.startsWith('lmvideo ')){const {verifyScriptRuns}=await import('./physics-lmvideo-script.mjs');return verifyScriptRuns(data,options);}return verifyRigidRuns(data,recipe,options);}
  const {root,toolRepo=path.join(os.homedir(),'repos/lmctlhq/physim'),binary=process.env.PHYSIM_BIN??path.join(toolRepo,'target/release/physim')}=options;
  require(root,'Supply reviewed content repository root');require(data?.schema==='egtry-real-runs/1','Unknown real-run schema');require(data.tool?.name==='physim','No replay adapter for '+data.tool?.name+'; cannot claim verified data');
@@ -43,6 +44,7 @@ export async function verifyRecordedRuns(data,recipe,options={}){
  return {status:'PASS',scope:'Independent tool replay and declared physical-check verification; human scientific review still required',tool:data.tool,scenario:data.scenario,runs,comparedValues:compared};
 }
 export async function discoverRecipe(data,root){
+ if(data.tool?.name==='lmvideo'&&data.workflow?.kind==='lmvideo-lmscript-host'){const file=await contained(root,data.recipe?.file);same(digest(await fs.readFile(file)),data.recipe.sha256,'Host recipe hash');return JSON.parse(await fs.readFile(file,'utf8'));}
  if(data.tool?.name==='lmvideo'&&data.tool.version?.startsWith('lmvideo '))return {adapter:'upstream-lmvideo-script'};
  if(data.tool?.name==='lmvideo'){const file=await contained(root,data.scenario.file);same(digest(await fs.readFile(file)),data.scenario.sha256,'Rigid scenario hash');return JSON.parse(await fs.readFile(file,'utf8'));}
  if(data.recipe?.file){const file=await contained(root,data.recipe.file);same(digest(await fs.readFile(file)),data.recipe.sha256,'Recipe SHA256');return JSON.parse(await fs.readFile(file,'utf8'));}
@@ -73,4 +75,28 @@ export async function verifyMutationRejected(data,recipe,options){
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  try{const arg=k=>{const i=process.argv.indexOf('--'+k);return i<0?undefined:process.argv[i+1];},root=arg('root');require(root&&arg('asset'),'Use --root REPO --asset FILE [--recipe FILE] [--tool-repo DIR] [--binary FILE] [--out FILE]');const data=JSON.parse(await fs.readFile(arg('asset'),'utf8')),recipe=arg('recipe')?JSON.parse(await fs.readFile(arg('recipe'),'utf8')):await discoverRecipe(data,root),result=await verifyRecordedRuns(data,recipe,{root,toolRepo:arg('tool-repo'),binary:arg('binary')});if(process.argv.includes('--mutation-check'))result.mutations=await verifyMutationRejected(data,recipe,{root,toolRepo:arg('tool-repo'),binary:arg('binary')});if(arg('out'))await fs.writeFile(arg('out'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));}catch(e){console.error(e.stack??e);process.exitCode=1;}
+}
+
+// Real rendered LMCode-host scenes use the original lmvideo executable, not the
+// native fixture exporter. Scripts and parameters must match committed recipes.
+export async function verifyHostRuns(data,recipe,{root,toolRepo=path.join(os.homedir(),'repos/lmctlhq/lmvideo'),binary=path.join(toolRepo,'build/lmvideo')}={}){
+ require(root&&data.schema==='egtry-real-runs/1'&&recipe.schema==='egtry-lmvideo-host-recipe/1','Unknown host replay contract');
+ same(digest(await fs.readFile(binary)),data.tool.binarySha256,'Host binary SHA256');same((await exec(binary,['--version'])).stdout.trim(),data.tool.version,'Host version');same((await exec('lmscript',['--version'])).stdout.trim(),data.tool.compilerVersion,'Host compiler version');
+ same((await exec('git',['-C',toolRepo,'rev-parse','HEAD'])).stdout.trim(),data.tool.commit,'Host source checkout');require(!(await exec('git',['-C',toolRepo,'status','--porcelain','--untracked-files=no'])).stdout.trim(),'Host checkout dirty');
+ same(recipe.scenario,data.scenario.file,'Host original scenario');same(digest(await fs.readFile(await contained(toolRepo,recipe.scenario))),data.scenario.sha256,'Host original scenario hash');
+ const vf=await contained(root,recipe.validator),vb=await fs.readFile(vf);same(recipe.validator,data.validator.file,'Host validator');same(digest(vb),data.validator.sha256,'Host validator hash');const vu=pathToFileURL(vf);vu.searchParams.set('sha256',digest(vb));const validator=await import(vu.href);
+ require(recipe.runs?.length===data.runs.length&&data.runs.length>0,'Host grid differs');let compared=0;const evidence=[];
+ for(let i=0;i<data.runs.length;i++){
+  const r=data.runs[i],v=recipe.runs[i],source=await contained(root,v.script),script=await fs.readFile(source,'utf8'),input={scenarioFile:recipe.scenario,scenarioSha256:digest(script),script,parameters:v.parameters};finiteTree(r);
+  same(r.input,input,'Host resolved input');same(r.parameters,v.parameters,'Host parameters');same(r.label,v.label,'Host label');same(r.inputSha256,digest(JSON.stringify(input,null,2)+'\n'),'Host input hash');
+  require(v.parameters.bakeFrames===180&&v.parameters.bakeStride===1&&v.parameters.fixedDtS===.008333333,'Unreviewed host sampling contract');
+  const cacheKey=data.tool.binarySha256+':host:'+r.inputSha256;let output=rawCache.get(cacheKey);
+  if(!output){const dir=await fs.mkdtemp(path.join(os.tmpdir(),'lmvideo-host-qa-'));try{const file=path.join(dir,'scenario.lms');await fs.writeFile(file,script);const result=await exec('lmscript',[file],{cwd:dir,env:{...process.env,PATH:path.dirname(binary)+path.delimiter+process.env.PATH},timeout:120000,maxBuffer:64*1024*1024});output={stdout:result.stdout,clip:await fs.readFile(path.join(dir,v.clipOutput)),poster:await fs.readFile(path.join(dir,v.posterOutput))};rawCache.set(cacheKey,output);}finally{await fs.rm(dir,{recursive:true,force:true});}}
+  same(digest(output.stdout),r.rawSha256,'Host raw stdout hash');const values=JSON.parse(output.stdout),samples=Array.from({length:180},(_,i)=>({t:i*v.parameters.fixedDtS,...Object.fromEntries(['x','y','vx','vy'].map(k=>[k,values[`${i}_${k}`]]))}));finiteTree(samples);same(r.samples,samples,'Published numeric samples');same(r.samplesSha256,digest(JSON.stringify(samples)),'Host sample hash');
+  same(r.columns,{t:{unit:'s'},x:{unit:'m'},y:{unit:'m'},vx:{unit:'m/s'},vy:{unit:'m/s'}},'Host channel units');same(r.axis,{key:'t',kind:'time',unit:'s'},'Host axis');same(r.decimation.originalCount,180,'Host original count');same(r.decimation.indices,samples.map((_,i)=>i),'Host retained frames');
+  same(r.media.physicalDurationS,samples.at(-1).t,'Host physical duration');same(r.media.playbackDurationS,4,'Host playback duration');
+  for(const key of ['clip','poster']){require(/^real\/[-a-zA-Z0-9_]+\.(mp4|png)$/.test(r.media[key]),'Unsafe host media path');same(digest(output[key]),r.media[key+'Sha256'],'Replayed host '+key+' hash');const media=await contained(root,recipe.bookRoot+'/assets/'+r.media[key]);same(digest(await fs.readFile(media)),r.media[key+'Sha256'],'Published host '+key+' hash');}
+  const checks=await validator.verify({samples,input});finiteTree(checks);require(checks.length&&checks.every(c=>c.tolerance>0&&Math.abs(c.residual)<=c.tolerance),'Host physical check failed');same(r.checks,checks,'Host physical evidence');compared+=samples.length*5;evidence.push({label:r.label,samples:samples.length,inputSha256:r.inputSha256,rawSha256:r.rawSha256,checks,media:r.media});
+ }
+ return {status:'PASS',scope:'Independent original lmvideo host execution, clip/poster hashes and all baked numeric samples; human scientific review still required',tool:data.tool,scenario:data.scenario,runs:evidence,comparedValues:compared};
 }
