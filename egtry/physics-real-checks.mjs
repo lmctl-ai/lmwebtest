@@ -20,7 +20,9 @@ export function recordedSeekReached(run,index,attributes){
  const axis=run.axis??{key:'t',kind:'time',unit:'s'},last=run.samples.length-1;
  if(Number(index)!==last)return false;
  if(axis.kind==='static')return true;
- const value=attributes[axis.kind==='time'?'data-time':'data-coordinate'];
+ // Older pages store every axis in data-time; axis labels and plotted values
+ // are independently checked against the declared physical coordinate.
+ const value=axis.kind==='time'?attributes['data-time']:(attributes['data-coordinate']??attributes['data-time']);
  return value!==null&&value!==undefined&&value!==''&&Number(value)===run.samples[last][axis.key];
 }
 export async function installRealCanvasProbe(page){await page.addInitScript(()=>{
