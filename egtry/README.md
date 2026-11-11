@@ -405,3 +405,14 @@ encoding metadata in each run proof, after comparing actual render and source
 bytes. The archive gate requires those identities and matching measured browser
 playback/seek receipts. Native scalar totals count the fields actually checked
 (three for mass-only runs, five for energy/trajectory runs).
+
+Clip frame comparisons use 256×192 decoded pixels and retain the RGB difference
+threshold of 24. The documented zero-kick `domino-wave` control has a narrow
+stationary exception derived from complete independent PhysicsTake readbacks:
+18 dynamic bodies × 481 frames, displacement ≤0.001 m and rotation ≤0.001 rad.
+The certificate is bound to input/raw hashes; asset flags cannot enable it.
+Hashes, nonblank frames, Play, measured seeks and pause remain mandatory.
+Nonzero kicks and all other clips retain the moving-frame requirement.
+`physics-native-motion.test.mjs` rejects incomplete/duplicate rows, real motion,
+changed bounds and fabricated flags; the browser media fixture checks both the
+exception and the existing static-substitution rejection.
