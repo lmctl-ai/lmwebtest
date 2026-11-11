@@ -6,6 +6,10 @@ import {canvasPixels,perceptible} from './physics-checks.mjs';
 const require=(ok,message)=>{if(!ok)throw Error(message);};
 const equal=(a,b,message)=>require(canonical(a)===canonical(b),message);
 const fmt=n=>Number(n.toPrecision(10)).toString();
+export function referenceRows(run,basic,state){
+ const axis=run.axis??{key:'t',kind:'time',unit:'s'};
+ return run.samples.map(s=>({...(axis.kind==='static'?{}:{[axis.key]:s[axis.key]}),...state(basic,axis.kind==='static'?0:s[axis.key])}));
+}
 export async function installRealCanvasProbe(page){await page.addInitScript(()=>{
  const proto=CanvasRenderingContext2D.prototype,fill=proto.fillRect,text=proto.fillText;
  proto.fillRect=function(x,y,w,h){if(x===0&&y===0&&w>=this.canvas.width&&h>=this.canvas.height)this.canvas.__physicsQaLabels=[];return fill.apply(this,arguments);};
@@ -58,7 +62,7 @@ export async function checkRealThing(model,{page,request,book,root,toolRepo,bina
    await video.evaluate(v=>new Promise((resolve,reject)=>{if(v.readyState>=2)return resolve();v.addEventListener('loadeddata',resolve,{once:true});v.addEventListener('error',()=>reject(Error('Recorded clip failed to decode')),{once:true});v.load();}));
    const meta=await video.evaluate(v=>({width:v.videoWidth,height:v.videoHeight,duration:v.duration}));require(meta.width>0&&meta.height>0&&Math.abs(meta.duration-run.media.playbackDurationS)<.1,'Decoded clip disagrees with replay duration');
   }
-  const comparison=comparisonContract(config,!!(run.basic??data.basic));const baseline=comparison==='overlay'?run.samples.map(s=>({t:s.t,...basicModule.basicState(run.basic??data.basic,s.t)})):[];
+  const comparison=comparisonContract(config,!!(run.basic??data.basic));const baseline=comparison==='overlay'?referenceRows(run,run.basic??data.basic,basicModule.basicState):[];
   const axis=run.axis??{key:'t',kind:'time',unit:'s'},last=run.samples.length-1;await seek.press('End');require(Number(await seek.inputValue())===last&&(axis.kind==='static'||Number(await model.getAttribute('data-time'))===run.samples[last][axis.key]),'Seek did not reach the recorded time');
   const text=await measurement.innerText();for(const [key,meta]of Object.entries(run.columns))require(text.includes(`${key} = ${fmt(run.samples[last][key])} ${meta.unit}`),'Readout differs from saved sample: '+key);
   const signature=canonical(run.samples.map(({t,...values})=>values));if(signatures.length&&signature!==signatures[0])varied=true;signatures.push(signature);
