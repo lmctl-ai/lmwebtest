@@ -13,13 +13,15 @@ CHROME_MODE=0
 HOME_MODE=0
 PHYSICS_MODE=0
 DSA_MODE=0
+OR_MODE=0
 PASS_ARGS=()
 for arg in "$@"; do
   if [ "$arg" = "--help" ] || [ "$arg" = "-h" ]; then
-    echo "Usage: ./run.sh [--home | --chrome | --physics | --dsa] [--book <name>] [--host <host>] [--pages <N>] [--seed <S>] [--v1-host <host>] [--url-map <path>]"
+    echo "Usage: ./run.sh [--home | --chrome | --physics | --dsa | --or] [--book <name>] [--host <host>] [--pages <N>] [--seed <S>] [--v1-host <host>] [--url-map <path>]"
     echo ""
     echo "Options:"
     echo "  --dsa                      DSA books (R44): diagram follows the run, stages, 1280 and 390 (dsa.lms); --book python-dsa, also --origin URL, --pages N|all, --require-all, --report FILE"
+    echo "  --or                       Operations-research books (R45): static blocks, growth table, one Solve, slider and Check per page, 1280 and 390 (or.lms); --book integer-programming, also --origin URL, --pages N|all, --all-models, --expect-pages N, --report FILE"
     echo "  --physics                  Physics HTTP + Playwright QA, all pages at 1280 and 390 (physics.lms)"
     echo "  --home                     Run headless Chrome (Playwright) R37 homepage QA suite (home.lms) under flock /tmp/browser-gate.lock"
     echo "  --chrome                   Run headless Chrome (Playwright) book QA suite (chrome.lms) under flock /tmp/browser-gate.lock"
@@ -41,6 +43,8 @@ for arg in "$@"; do
     PHYSICS_MODE=1
   elif [ "$arg" = "--dsa" ]; then
     DSA_MODE=1
+  elif [ "$arg" = "--or" ]; then
+    OR_MODE=1
   elif [ "$arg" = "--chrome" ]; then
     CHROME_MODE=1
   elif [ "$arg" = "--home" ]; then
@@ -66,6 +70,16 @@ fi
 if ! command -v curl >/dev/null 2>&1; then
   echo "Error: curl is not on PATH" >&2
   exit 1
+fi
+
+# Operations-research mode: Playwright only, like DSA.
+if [ "$OR_MODE" -eq 1 ]; then
+  if [ "$HOME_MODE" -eq 1 ] || [ "$CHROME_MODE" -eq 1 ] || [ "$PHYSICS_MODE" -eq 1 ] || [ "$DSA_MODE" -eq 1 ]; then
+    echo "Error: --or cannot be combined with --home, --chrome, --physics or --dsa" >&2
+    exit 2
+  fi
+  cd "$HERE"
+  exec bash "$HERE/browser-lock.sh" /tmp/browser-gate.lock lmscript or.lms "${PASS_ARGS[@]}"
 fi
 
 # DSA mode: Playwright only, like physics.

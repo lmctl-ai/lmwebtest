@@ -127,6 +127,27 @@ are reported as "not ported" and skipped; `--require-all` makes them failures. T
 (default 42) pages. Report: `work/dsa_report_<book>.json` or `--report FILE`. DOM contract: interpreters
 `docs/design/simple-viewer/17-dsa-diagrams.md`.
 
+## Operations-research books R45 (`--or` / `or.lms`)
+
+```bash
+./run.sh --or --book integer-programming --host v2.egtry.com           # every page of the book index
+./run.sh --or --book scheduling --host www.egtry.com --pages 4 --seed 731
+./run.sh --or --book linear-programming --origin http://127.0.0.1:8099  # a local preview (node scripts/egtry/serve-site.mjs --site DIR --port 8099)
+./run.sh --or --book integer-programming --host www.egtry.com --all-models --expect-pages 11
+```
+
+`or.lms` calls `or-helper.mjs` under `flock /tmp/browser-gate.lock`. For each page at 1280 and 390: HTTP 200; before any
+click the page is complete (every model block `.orx[data-example]` has its picture with a text alternative, the model text,
+the printed lines and a statistics line with a solver status; at least two traced programs; a growth table
+`figure.org[data-growth]` with at least 3 measured counts that grow and rows beyond what was run) and no file under
+`/play/or/rt/` was requested. Then one Solve: the runtime is fetched from its digest directory, `lmlive-or.wasm` arrives as
+`application/wasm`, the block ends `live`, the canvas is drawn and the printed lines equal the recorded ones. The first
+slider solves again with another result and Start again restores it; a broken model reports `Line N:`; the first exercise's
+authored model fails Check with listed reasons and its reference solution (from the block's data) passes. No sideways
+overflow, console error or failed request. `--all-models` solves every model of the page. Report:
+`work/or_report_<book>.json` or `--report FILE`. DOM contract: interpreters
+`docs/design/operations-research/01-track-design.md` §3 and `web/or/page/or-main.js`.
+
 ## Physics R42 (`--physics` / `physics.lms`)
 
 ```bash
