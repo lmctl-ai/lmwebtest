@@ -108,6 +108,25 @@ For every kept URL of `/<book>/` in `url-map.json` (plus the book index `/<book>
 7. **Internal Relative Links**: Resolves all relative and root-relative links across the book and verifies zero broken internal links (`HTTP 200`).
 8. **Tracks Page Comparison**: Fetches `https://<host>/tracks/programming-languages/` and `https://<v1-host>/tracks/programming-languages/`, compares title/heading/links, and verifies the `/<book>/` link is present and returns `HTTP 200`.
 
+## DSA books R44 (`--dsa` / `dsa.lms`)
+
+```bash
+./run.sh --dsa --book python-dsa --host www.egtry.com                 # every page of the book index
+./run.sh --dsa --book java-dsa --host v2.egtry.com --pages 6 --seed 731
+./run.sh --dsa --book python-dsa --origin http://127.0.0.1:8099        # a local preview (node scripts/egtry/serve-site.mjs --site DIR --port 8099)
+./run.sh --dsa --book python-dsa --host www.egtry.com --require-all    # after the switch: a page without a diagram fails
+```
+
+`dsa.lms` calls `dsa-helper.mjs` under `flock /tmp/browser-gate.lock`. For each page at 1280 and 390: HTTP 200 and no console
+error or failed request; every example (`.sv[data-example][data-diagram]`, at least 3) has a diagram panel `.dg` with a picture
+before Run; stepping to the end keeps the panel on the viewer's step (`data-step`), the pictures change (different
+`svg[role=img]` text alternatives, captions), the stages run 1..n in order (2 to 16), each with a label and note; no sideways
+overflow, no clipped picture, the executing line stays visible (below the sticky panel at 390); the diagram is beside the code
+at 1280 and above it at 390; the Stage buttons visit every stage. While a book is being ported, index pages without a diagram
+are reported as "not ported" and skipped; `--require-all` makes them failures. The book index must list `--expect-pages`
+(default 42) pages. Report: `work/dsa_report_<book>.json` or `--report FILE`. DOM contract: interpreters
+`docs/design/simple-viewer/17-dsa-diagrams.md`.
+
 ## Physics R42 (`--physics` / `physics.lms`)
 
 ```bash

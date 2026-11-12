@@ -12,12 +12,14 @@ ROOT="$(cd "$HERE/.." && pwd)"
 CHROME_MODE=0
 HOME_MODE=0
 PHYSICS_MODE=0
+DSA_MODE=0
 PASS_ARGS=()
 for arg in "$@"; do
   if [ "$arg" = "--help" ] || [ "$arg" = "-h" ]; then
-    echo "Usage: ./run.sh [--home | --chrome | --physics] [--book <name>] [--host <host>] [--pages <N>] [--seed <S>] [--v1-host <host>] [--url-map <path>]"
+    echo "Usage: ./run.sh [--home | --chrome | --physics | --dsa] [--book <name>] [--host <host>] [--pages <N>] [--seed <S>] [--v1-host <host>] [--url-map <path>]"
     echo ""
     echo "Options:"
+    echo "  --dsa                      DSA books (R44): diagram follows the run, stages, 1280 and 390 (dsa.lms); --book python-dsa, also --origin URL, --pages N|all, --require-all, --report FILE"
     echo "  --physics                  Physics HTTP + Playwright QA, all pages at 1280 and 390 (physics.lms)"
     echo "  --home                     Run headless Chrome (Playwright) R37 homepage QA suite (home.lms) under flock /tmp/browser-gate.lock"
     echo "  --chrome                   Run headless Chrome (Playwright) book QA suite (chrome.lms) under flock /tmp/browser-gate.lock"
@@ -37,6 +39,8 @@ for arg in "$@"; do
     exit 0
   elif [ "$arg" = "--physics" ]; then
     PHYSICS_MODE=1
+  elif [ "$arg" = "--dsa" ]; then
+    DSA_MODE=1
   elif [ "$arg" = "--chrome" ]; then
     CHROME_MODE=1
   elif [ "$arg" = "--home" ]; then
@@ -62,6 +66,16 @@ fi
 if ! command -v curl >/dev/null 2>&1; then
   echo "Error: curl is not on PATH" >&2
   exit 1
+fi
+
+# DSA mode: Playwright only, like physics.
+if [ "$DSA_MODE" -eq 1 ]; then
+  if [ "$HOME_MODE" -eq 1 ] || [ "$CHROME_MODE" -eq 1 ] || [ "$PHYSICS_MODE" -eq 1 ]; then
+    echo "Error: --dsa cannot be combined with --home, --chrome or --physics" >&2
+    exit 2
+  fi
+  cd "$HERE"
+  exec bash "$HERE/browser-lock.sh" /tmp/browser-gate.lock lmscript dsa.lms "${PASS_ARGS[@]}"
 fi
 
 # Physics uses Playwright DOM extraction and needs no lmhtml binary/download.

@@ -1,0 +1,10 @@
+# DSA book QA (R44): pages with a diagram that follows the run. Browser and HTTP evidence live in dsa-helper.mjs.
+# All browser work is serialized with the other egtry suites.
+let command = ["bash", "browser-lock.sh", "/tmp/browser-gate.lock", "node", "dsa-helper.mjs"];
+for (i in range(0, args.len())) {
+  push(command, args.get(i, ""));
+}
+let result = system(command);
+println(result.get("stdout", ""));
+println(result.get("stderr", ""));
+exit(result.get("code", 1));
