@@ -1,7 +1,22 @@
 {
-  "name": "lmwebtest",
+  "name": "@lmctl-ai/lmwebtest",
   "version": "0.1.0",
   "description": "Lightweight Playwright web page checks and screenshots",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lmctl-ai/lmwebtest.git"
+  },
+  "homepage": "https://github.com/lmctl-ai/lmwebtest#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "src",
+    "schema",
+    "LICENSE",
+    "README.md"
+  ],
   "type": "module",
   "bin": {
     "lmwebtest": "src/cli.js"
