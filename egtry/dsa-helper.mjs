@@ -14,6 +14,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
+import {geometryProblems, diagramChanges} from './dsa-geometry.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 function options(args) {
@@ -38,12 +39,20 @@ export function sample(list, n, seed) {
   return list.filter(x => x === list[0] || x === list.at(-1) || pick.includes(x)).slice(0, Math.max(n, 1));
 }
 const snap = root => root.evaluate(el => {
-  const dg = el.querySelector('.dg'), win = el.querySelector('.sv-window'), box = x => { const b = x.getBoundingClientRect(); return {left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: b.width}; };
+  const dg = el.querySelector('.dg'), win = el.querySelector('.sv-window'), box = x => { const b = x.getBoundingClientRect(); return {left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: b.width, height: b.height}; };
+  const svgBox = svg => {
+    const g = box(svg), view = svg.closest('.dg-view');
+    if (!view) return g;
+    const v = box(view), left = v.left + view.clientLeft;
+    return {...g, contentLeft: g.left - left + view.scrollLeft, contentRight: g.right - left + view.scrollLeft,
+      view: {...v, left, right: left + view.clientWidth, width: view.clientWidth, scrollWidth: view.scrollWidth, overflowX: getComputedStyle(view).overflowX}};
+  };
+  const w = win && box(win); if (w) { w.top += win.clientTop; w.bottom = w.top + win.clientHeight; }
   const cur = el.querySelector('.sv-line[aria-current="step"]'), count = /stage (\d+) of (\d+)/.exec(dg?.querySelector('.dg-stage-count')?.textContent ?? '');
   return {state: el.dataset.state, step: Number(el.dataset.step), dgStep: Number(dg?.dataset.step ?? -1), stage: Number(dg?.dataset.stage ?? -1), live: dg?.dataset.live,
     stageOf: count ? [Number(count[1]), Number(count[2])] : null, label: dg?.querySelector('.dg-stage-label')?.textContent ?? '', note: dg?.querySelector('.dg-note')?.textContent ?? '',
     caption: dg?.querySelector('.dg-caption')?.textContent ?? '', alts: [...(dg?.querySelectorAll('svg[role=img]') ?? [])].map(s => s.getAttribute('aria-label') ?? ''),
-    svgs: [...(dg?.querySelectorAll('svg') ?? [])].map(box), dg: dg && box(dg), win: win && box(win), line: cur && box(cur), sticky: dg ? getComputedStyle(dg).position : '',
+    svgs: [...(dg?.querySelectorAll('svg') ?? [])].map(svgBox), dg: dg && box(dg), win: w, bar: box(el.querySelector('.sv-bar')), line: cur && box(cur), sticky: dg ? getComputedStyle(dg).position : '',
     overflow: document.documentElement.scrollWidth - innerWidth, vh: innerHeight};
 });
 
@@ -56,7 +65,7 @@ export async function checkPage(browser, url, width, maxSteps, add) {
   page.on('console', m => { if (m.type() === 'error') noise.push('console: ' + m.text()); });
   page.on('response', r => { if (r.status() >= 400) noise.push(`${r.status()} ${r.url()}`); });
   const at = `${new URL(url).pathname} @${width}`;
-  let ported = false;
+  let ported = false; const examples = [];
   try {
     const response = await page.goto(url);
     add(response.status() === 200, `${at}: HTTP ${response.status()}`);
@@ -65,6 +74,8 @@ export async function checkPage(browser, url, width, maxSteps, add) {
     ported = true;
     add(total >= 3 && withDiagram === total, `${at}: ${withDiagram} of ${total} examples have a diagram (at least 3, all of them)`);
     await page.waitForFunction(() => [...document.querySelectorAll('.sv[data-example]')].every(el => el.dataset.state === 'ready'));
+    await page.clock.install();
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 200));
     add(await page.locator('link[rel=stylesheet][href*="diagram.css"]').count() === 1, `${at}: the diagram stylesheet is linked`);
     for (let n = 0; n < total; n++) {
       const root = page.locator('.sv[data-example]').nth(n), id = await root.getAttribute('data-example'), ex = `${at} ${id}`;
@@ -74,10 +85,15 @@ export async function checkPage(browser, url, width, maxSteps, add) {
       add(s.overflow <= 1, `${ex}: sideways overflow ${s.overflow}px`);
       if (width >= 1000) add(s.dg.left >= s.win.right - 1 && Math.abs(s.dg.top - s.win.top) <= 4, `${ex}: the diagram is beside the code`);
       else add(s.dg.top <= s.win.top && s.dg.left <= s.win.left + 1 && s.sticky === 'sticky', `${ex}: the diagram is above the code and sticky`);
-      const pictures = new Set(), stages = [], notes = new Set(), problems = [];
+      const pictures = new Set(), stages = [], notes = new Set(), problems = [], evidence = [];
+      let scrollablePictures = 0;
       let steps = 0, captions = 0;
       for (; steps < maxSteps; steps++) {
         await root.locator('.sv-step').click();
+        // Fast uses at most a 450ms glide. Four bounded clock jumps drive it
+        // through execution dwell without inspecting the pre-glide target line.
+        // Bounded jumps also respect the viewer's background-frame time cap.
+        for (let frame = 0; frame < 4; frame++) await page.clock.fastForward(250);
         s = await snap(root);
         if (s.state === 'ended') break;
         const k = steps + 1;
@@ -87,30 +103,31 @@ export async function checkPage(browser, url, width, maxSteps, add) {
         pictures.add(s.alts.join(' | '));
         if (s.caption) captions++;
         if (s.alts.some(a => !a || /undefined|NaN|\[object/.test(a))) problems.push(`step ${k}: a picture has no proper text alternative`);
-        if (s.svgs.some(g => g.right > s.dg.right + 1 || g.width < 40)) problems.push(`step ${k}: a picture is cut off or collapsed`);
-        if (s.overflow > 1) problems.push(`step ${k}: sideways overflow ${s.overflow}px`);
-        if (s.line && (s.line.top < -1 || s.line.bottom > s.vh + 1)) problems.push(`step ${k}: the executing line is outside the viewport`);
-        if (width < 1000 && s.line && s.dg.top <= 1 && s.line.top < s.dg.bottom - 1) problems.push(`step ${k}: the executing line is under the sticky diagram`);
+        const faults = geometryProblems(s, width);
+        for (const fault of faults) problems.push(`step ${k}: ${fault}`);
+        if (faults.length) evidence.push({step: k, faults, geometry: s});
+        scrollablePictures += s.svgs.filter(g => g.view && g.view.scrollWidth > g.view.width + 1).length;
       }
+      examples.push({id, steps, scrollablePictures, problems: evidence});
       const n_stages = s.stageOf?.[1] ?? stages.length;
       add(s.state === 'ended' && steps > 3, `${ex}: stepping reaches the end (${steps} steps, state ${s.state})`);
       add(problems.length === 0, `${ex}: ${problems.length} step problem(s): ${problems.slice(0, 3).join('; ')}`);
-      add(pictures.size >= 3 && captions >= 2, `${ex}: the diagram changes across steps (${pictures.size} different pictures, ${captions} captions)`);
+      add(diagramChanges(pictures.size, captions), `${ex}: the diagram changes across steps (${pictures.size} different pictures, ${captions} captions)`);
       add(n_stages >= 2 && n_stages <= 16 && JSON.stringify(stages) === JSON.stringify(Array.from({length: n_stages}, (_, i) => i + 1)), `${ex}: stages run 1..${n_stages} in order (seen ${stages.join(',')})`);
       add(notes.size >= Math.min(2, n_stages), `${ex}: stages have their own notes (${notes.size} different)`);
       // stage buttons: after the end ▶ restarts at stage 1, then one stage per press; ◀ goes back
       const seen = [];
-      for (let i = 0; i < n_stages; i++) { await root.locator('.dg-next').click(); await page.waitForTimeout(40); s = await snap(root); seen.push(s.stage); }
+      for (let i = 0; i < n_stages; i++) { await root.locator('.dg-next').click(); await page.clock.runFor(1000); s = await snap(root); seen.push(s.stage); }
       add(JSON.stringify(seen) === JSON.stringify(Array.from({length: n_stages}, (_, i) => i + 1)) && s.state === 'stepping', `${ex}: Stage ▶ visits every stage (${seen.join(',')})`);
       add(await root.locator('.dg-next').isDisabled(), `${ex}: Stage ▶ is disabled in the last stage`);
-      await root.locator('.dg-prev').click(); await page.waitForTimeout(40); s = await snap(root);
+      await root.locator('.dg-prev').click(); await page.clock.runFor(1000); s = await snap(root);
       add(s.stage === Math.max(1, n_stages - 1), `${ex}: ◀ Stage goes back one stage (now ${s.stage})`);
       await root.locator('.sv-edit-btn').click().catch(() => {});
     }
     add(noise.length === 0, `${at}: console errors or failed requests: ${noise.slice(0, 3).join('; ')}`);
   } catch (error) { add(false, `${at}: ${String(error?.message ?? error).split('\n')[0]}`); }
   await context.close();
-  return {ported};
+  return {ported, examples};
 }
 
 async function main() {
@@ -122,17 +139,17 @@ async function main() {
   add(slugs.length === Number(o['expect-pages']), `book index lists ${slugs.length} pages (expected ${o['expect-pages']})`);
   const chosen = o.pages === 'all' ? slugs : sample(slugs, Number(o.pages), Number(o.seed));
   const browser = await chromium.launch(process.env.CHROME ? {executablePath: process.env.CHROME} : {});
-  const notPorted = [], ported = [];
+  const notPorted = [], ported = [], visits = [];
   for (const slug of chosen) {
     const before = checks.length;
     let state;
-    for (const width of [1280, 390]) { state = await checkPage(browser, `${bookUrl}${slug}/`, width, Number(o['max-steps']), add); if (!state.ported) break; }
+    for (const width of [1280, 390]) { state = await checkPage(browser, `${bookUrl}${slug}/`, width, Number(o['max-steps']), add); visits.push({slug, width, ...state}); if (!state.ported) break; }
     if (state.ported) ported.push(slug); else { notPorted.push(slug); if (o['require-all']) add(false, `${slug}: no diagram on the page (not ported yet)`); }
     console.log(`${state.ported ? (checks.slice(before).every(c => c.ok) ? 'PASS' : 'FAIL') : 'SKIP (no diagram yet)'} ${slug}  ${checks.slice(before).filter(c => c.ok).length}/${checks.length - before}`);
   }
   await browser.close();
   add(ported.length > 0, `at least one page of the sample has a diagram (${ported.length})`);
-  const failed = checks.filter(c => !c.ok), report = {suite: 'egtry-dsa', book: o.book, origin, chrome: 'playwright chromium', finished: new Date().toISOString(), pages: chosen.length, ported, notPorted, checks: checks.length, failed: failed.length, results: checks};
+  const failed = checks.filter(c => !c.ok), report = {suite: 'egtry-dsa', book: o.book, origin, chrome: 'playwright chromium', finished: new Date().toISOString(), pages: chosen.length, ported, notPorted, visits, checks: checks.length, failed: failed.length, results: checks};
   const file = o.report ?? path.join(here, 'work', `dsa_report_${o.book}.json`);
   await fs.mkdir(path.dirname(file), {recursive: true});
   await fs.writeFile(file, JSON.stringify(report, null, 2) + '\n');

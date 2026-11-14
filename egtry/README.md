@@ -466,3 +466,13 @@ bytes before returning media identities. Incomplete/reordered ledgers,
 displaced bodies, forged hashes and changed render/source bytes fail regressions.
 Book-level and browser adapters pass the source book automatically; direct
 physics-replay.mjs calls infer it from content/books/BOOK/assets or accept --book.
+
+## DSA execution geometry
+
+The DSA sweep measures manual execution dwell after the Step glide, with normal motion enabled. It freezes page time after readiness and advances four bounded 250 ms clock jumps after each Step. Bounded jumps respect the viewer's background-frame cap; measuring immediately after a click mistakes the target line during its glide for a visibility failure.
+
+A readable wide SVG may pan inside its `.dg-view`. The checker verifies that the figure stays within the diagram, its overflow allows scrolling, and the full drawing is reachable within its scroll range. Hidden overflow, unreachable content and collapsed pictures fail. It also checks the source window's client bounds, viewport and sticky-panel containment, and reachable phone controls.
+
+A valid example can have exactly one mutation caption, such as the single change of `best` in a pre-populated frequency map. The sweep requires at least three distinct pictures and at least one caption; a static or captionless example fails.
+
+Run the assertion regressions with `node --test egtry/dsa-geometry.test.mjs` from the repository root. Full coverage remains `egtry/run.sh --dsa --book python-dsa --host v2.egtry.com --require-all --report /tmp/dsa-python.json` (42 pages, both widths, every example and step).
