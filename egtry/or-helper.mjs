@@ -51,7 +51,7 @@ export function growthChecks({measured, sizes, formula, far}) {
     sizes.every((n, i) => Number.isInteger(n) && n >= 0 && n <= bound && (i === 0 || n > sizes[i - 1]) &&
       measured[i] === Array.from({length: n}, (_, k) => BigInt(bound - k)).reduce((a, b) => a * b, 1n));
   const completeFinite = finite && sizes.at(-1) === bound;
-  const grows = valid && measured.at(-1) >= 20n * measured[0] &&
+  const grows = valid && (!match || finite) && measured.at(-1) >= 20n * measured[0] &&
     measured.every((v, i) => i === 0 || (finite ? v >= measured[i - 1] : v > measured[i - 1]));
   return {grows, extent: far >= 1 || completeFinite, finite, completeFinite};
 }

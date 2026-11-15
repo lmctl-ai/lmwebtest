@@ -27,7 +27,9 @@ test('the full finite magic-square domain may end with equal counts and no far r
 
 test('finite exemption requires exact counts, ordered domain positions and exhaustion', () => {
   assert.equal(growthChecks({...magic, sizes: [2, 3, 4, 5, 6, 7, 8, 8]}).extent, false);
-  assert.equal(growthChecks({...magic, measured: [...magic.measured.slice(0, -1), 400000n]}).extent, false);
+  const incorrect = {...magic, measured: [...magic.measured.slice(0, -1), 400000n]};
+  assert.equal(growthChecks(incorrect).extent, false);
+  assert.equal(growthChecks({...incorrect, far: 1}).grows, false);
   const partial = {...magic, measured: magic.measured.slice(0, -1), sizes: magic.sizes.slice(0, -1)};
   assert.equal(growthChecks(partial).extent, false);
   assert.equal(growthChecks({...partial, far: 1}).extent, true);
