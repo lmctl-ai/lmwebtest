@@ -36,9 +36,26 @@ function options(args) {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(out.book)) throw Error('Invalid book slug');
   return out;
 }
-const STATUS = /(CP-SAT|GLOP|SAT|PDLP) (OPTIMAL|FEASIBLE|INFEASIBLE|UNBOUNDED)/;
+export const STATUS = /\b(CP-SAT|GLOP|SAT|PDLP|Flow|Routing) (OPTIMAL|FEASIBLE|INFEASIBLE|UNBOUNDED)\b/;
 /** The counts of a growth table as BigInt, read from its cells (`1,048,576`; `1.27 × 10^30` is skipped). */
 export const counts = cells => cells.map(t => /^[\d,]+$/.test(t.trim()) ? BigInt(t.replace(/,/g, '')) : null);
+/** A bounded falling-factorial formula declares the finite domain 0 <= n <= K.
+ * Only exact measured values at increasing domain positions can establish exhaustion.
+ * Other formula families keep the unbounded table rules; no book/slug exceptions.
+ */
+export function growthChecks({measured, sizes, formula, far}) {
+  const match = formula.replace(/\s/g, '').match(/^(\d+)!\/\(\1-n\)!$/);
+  const bound = match ? Number(match[1]) : NaN;
+  const valid = measured.length >= 3 && measured.every(v => typeof v === 'bigint' && v > 0n);
+  const finite = valid && Number.isSafeInteger(bound) && bound <= 1000 && sizes.length === measured.length &&
+    sizes.every((n, i) => Number.isInteger(n) && n >= 0 && n <= bound && (i === 0 || n > sizes[i - 1]) &&
+      measured[i] === Array.from({length: n}, (_, k) => BigInt(bound - k)).reduce((a, b) => a * b, 1n));
+  const completeFinite = finite && sizes.at(-1) === bound;
+  const grows = valid && measured.at(-1) >= 20n * measured[0] &&
+    measured.every((v, i) => i === 0 || (finite ? v >= measured[i - 1] : v > measured[i - 1]));
+  return {grows, extent: far >= 1 || completeFinite, finite, completeFinite};
+}
+
 const state = (page, id) => page.locator(`.orx[data-example="${id}"]`).getAttribute('data-state');
 const settled = (page, id) => page.waitForFunction(id => ['live', 'failed'].includes(document.querySelector(`.orx[data-example="${id}"]`).dataset.state), id, {timeout: 90000});
 const ink = canvas => canvas.evaluate(c => { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] < 720) n++; return n; });
@@ -74,9 +91,12 @@ export async function checkPage(browser, url, width, o, add) {
     for (let g = 0; g < growth; g++) {
       const figure = page.locator('figure.org[data-growth]').nth(g), id = await figure.getAttribute('data-growth');
       const measured = counts(await figure.locator('tbody tr:not(.org-far) .org-count').allTextContents()), far = await figure.locator('tbody tr.org-far').count();
-      add(measured.length >= 3 && measured.every(v => v !== null) && measured.every((v, i) => i === 0 || v > measured[i - 1]), `${at} ${id}: ${measured.length} measured counts that grow (${measured.join(', ')})`);
-      add(far >= 1, `${at} ${id}: the table goes beyond what was run (${far} far rows)`);
-      add((await figure.locator('figcaption code').first().textContent()).trim().length > 0, `${at} ${id}: the formula is stated`);
+      const formula = (await figure.locator('figcaption code').first().textContent()).trim();
+      const sizes = (await figure.locator('tbody tr:not(.org-far) th[scope="row"]').allTextContents()).map(t => /^\d+$/.test(t.trim()) ? Number(t.trim()) : NaN);
+      const growthResult = growthChecks({measured, sizes, formula, far});
+      add(growthResult.grows, `${at} ${id}: ${measured.length} positive measured counts grow at least 20x overall${growthResult.finite ? ' (non-decreasing finite domain)' : ' (strictly increasing)'} (${measured.join(', ')})`);
+      add(growthResult.extent, `${at} ${id}: the table extends beyond measured rows or exhausts its declared finite domain (${far} far rows; exhausted ${growthResult.completeFinite})`);
+      add(formula.length > 0, `${at} ${id}: the formula is stated`);
     }
     add(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 1, `${at}: no sideways overflow before Solve`);
 

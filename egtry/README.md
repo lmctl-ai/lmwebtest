@@ -139,7 +139,7 @@ are reported as "not ported" and skipped; `--require-all` makes them failures. T
 `or.lms` calls `or-helper.mjs` under `flock /tmp/browser-gate.lock`. For each page at 1280 and 390: HTTP 200; before any
 click the page is complete (every model block `.orx[data-example]` has its picture with a text alternative, the model text,
 the printed lines and a statistics line with a solver status; at least two traced programs; a growth table
-`figure.org[data-growth]` with at least 3 measured counts that grow and rows beyond what was run) and no file under
+`figure.org[data-growth]` with at least 3 positive measured counts, at least 20x growth overall, and rows beyond what was run or an exhausted finite domain) and no file under
 `/play/or/rt/` was requested. Then one Solve: the runtime is fetched from its digest directory, `lmlive-or.wasm` arrives as
 `application/wasm`, the block ends `live`, the canvas is drawn and the printed lines equal the recorded ones. The first
 slider solves again with another result and Start again restores it; a broken model reports `Line N:`; the first exercise's
@@ -147,6 +147,18 @@ authored model fails Check with listed reasons and its reference solution (from 
 overflow, console error or failed request. `--all-models` solves every model of the page. Report:
 `work/or_report_<book>.json` or `--report FILE`. DOM contract: interpreters
 `docs/design/operations-research/01-track-design.md` §3 and `web/or/page/or-main.js`.
+
+The accepted solver labels are CP-SAT, GLOP, SAT, PDLP, Flow and Routing, with OPTIMAL,
+FEASIBLE, INFEASIBLE or UNBOUNDED status. Growth is strictly increasing by default.
+A bounded falling factorial `K!/(K-n)!` explicitly declares the finite integer domain
+`0 <= n <= K` (supported for K up to 1,000). For that formula, exact measured counts at increasing domain positions
+may be non-decreasing (the final two counts coincide); the table needs no unmeasured
+far row only when its last measured size is K. This recognizes finite instances rather
+than naming books or lessons. Every table still needs at least three positive counts
+and at least 20x growth from first to last. Missing counts, decreasing/flat tables,
+weak growth, incorrect finite counts and incomplete finite domains without far rows fail.
+Other finite formula families require explicit checker support; arbitrary prose does not
+waive the growth checks. Regression tests: `node --test egtry/or-helper.test.mjs`.
 
 ## Physics R42 (`--physics` / `physics.lms`)
 
