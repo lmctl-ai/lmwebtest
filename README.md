@@ -5,6 +5,13 @@ Web integration test suite and browser automation host powered by `lmwebtest`, `
 [![CI](https://github.com/lmctl-ai/lmwebtest/actions/workflows/ci.yml/badge.svg)](https://github.com/lmctl-ai/lmwebtest/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+## Documentation
+
+- [Quick reference](https://www.lmctl.com/tools/lmwebtest/)
+- [LLM skill](https://www.lmctl.com/tools/lmwebtest/skill.html)
+- [Guide](https://www.lmctl.com/tools/lmwebtest/guide.html)
+- [Reference](https://www.lmctl.com/tools/lmwebtest/reference.html)
+
 ## Architecture
 
 The workflow separates **navigation and download** from **extraction** from **orchestration**. Navigation has two interchangeable implementations — pick the cheaper one that works:
