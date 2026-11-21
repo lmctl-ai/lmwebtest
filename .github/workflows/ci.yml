@@ -187,6 +187,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write
+      actions: write   # dispatch release.yml (npm) after the GitHub release
     concurrency:
       group: release
       cancel-in-progress: false
@@ -227,6 +228,12 @@ jobs:
           fi
           IFS=. read -r major minor patch <<< "${last#v}"
           next="${major}.${minor}.$((patch + 1))"
+          # never reuse a number npm already has (a version published by hand): npm refuses it, so it would never ship
+          while npm view "@lmctl-ai/lmwebtest@${next}" version >/dev/null 2>&1; do
+            echo "npm already has ${next}; skipping it"
+            IFS=. read -r major minor patch <<< "$next"
+            next="${major}.${minor}.$((patch + 1))"
+          done
           echo "previous=$last next=v$next"
           echo "skip=false" >> "$GITHUB_OUTPUT"
           echo "version=$next" >> "$GITHUB_OUTPUT"
@@ -258,6 +265,13 @@ jobs:
             --title "v${{ steps.version.outputs.version }}" \
             --generate-notes \
             --latest
+
+      - name: publish to npm (release.yml, trusted publishing)
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          # a release created with the workflow token starts no workflow by itself, but a dispatch does; release.yml
+          # also checks hourly, so a failed dispatch only delays npm
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="v${{ steps.version.outputs.version }}"
 
   neochart:
     name: neochart-live

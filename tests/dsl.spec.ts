@@ -26,10 +26,11 @@ async function runLmscript(source: string) {
   }
 }
 
-test('CLI exposes --version matching release version', async () => {
+test('CLI exposes --version matching package.json (set from the release tag when releasing)', async () => {
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
   const result = await runCli('--version');
   expect(result.code).toBe(0);
-  expect(result.stdout.trim()).toBe('lmwebtest 0.1.0');
+  expect(result.stdout.trim()).toBe(`lmwebtest ${pkg.version}`);
 });
 
 test('CLI exposes --dsl-signatures and --lmcode-signatures identically', async () => {

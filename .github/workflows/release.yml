@@ -1,42 +1,101 @@
 name: release
 
+# Publishes a GitHub release of lmwebtest to npm as @lmctl-ai/lmwebtest, through npm trusted publishing (OIDC): no npm
+# token exists anywhere. npm trusts this file by name (release.yml, repository lmctl-ai/lmwebtest, no environment), so
+# keep the name. The version comes from the release tag, not from package.json, so nobody bumps anything by hand.
+#
+# Triggers:
+# - workflow_dispatch: ci.yml's release job starts it right after it creates vX.Y.Z (a release created with the
+#   workflow token starts no other workflow, but a dispatch does). By hand: gh workflow run release.yml -f tag=vX.Y.Z
+# - schedule: an hourly catch-up that publishes the latest release when npm does not have it yet.
+# A version already on npm is skipped, so every run is safe to repeat.
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (default is the latest release)
+        required: false
+        default: ''
+  schedule:
+    - cron: '41 * * * *'
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-npm
   cancel-in-progress: false
 
 jobs:
   publish-npm:
-    # npm trusted publishing (OIDC): no stored token. @lmctl-ai/lmwebtest trusts this repository and workflow.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - name: use an npm that supports trusted publishing
-        run: npm install --global npm@11
-      - name: publish the package version in package.json if the registry does not have it
+      - name: resolve the release
+        id: release
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
         run: |
           set -euo pipefail
-          name=$(node -p "require('./package.json').name")
-          version=$(node -p "require('./package.json').version")
-          if npm view "$name@$version" version >/dev/null 2>&1; then
-            echo "$name@$version is already on the registry; nothing to publish"
-            exit 0
+          tag="${INPUT_TAG:-}"
+          if [ -z "$tag" ]; then tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"; fi
+          [[ "$tag" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]] || { echo "release tag '$tag' is not vMAJOR.MINOR.PATCH" >&2; exit 1; }
+          version="${BASH_REMATCH[1]}"
+          if npm view "@lmctl-ai/lmwebtest@${version}" version >/dev/null 2>&1; then
+            echo "@lmctl-ai/lmwebtest@${version} is already on npm; nothing to do"
+            echo "todo=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          tag=latest
-          case "$version" in *-*) tag=next ;; esac
-          npm publish --access public --provenance --tag "$tag"
+          # an older release published late (a manual run for an old tag) must not take the latest dist-tag
+          current="$(npm view @lmctl-ai/lmwebtest dist-tags.latest 2>/dev/null || true)"
+          disttag=latest
+          if [ -n "$current" ] && [ "$(printf '%s\n%s\n' "$current" "$version" | sort -V | tail -n1)" != "$version" ]; then disttag=backfill; fi
+          echo "publishing $tag as $version (dist-tag $disttag)"
+          { echo "todo=true"; echo "tag=$tag"; echo "version=$version"; echo "disttag=$disttag"; } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        if: steps.release.outputs.todo == 'true'
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: steps.release.outputs.todo == 'true'
+        with:
+          node-version: 24
+
+      - name: use an npm that supports trusted publishing
+        if: steps.release.outputs.todo == 'true'
+        run: npm install --global npm@11.19.1 && npm --version
+
+      - name: publish
+        if: steps.release.outputs.todo == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          DISTTAG: ${{ steps.release.outputs.disttag }}
+        run: |
+          set -euo pipefail
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          npm publish --access public --provenance --tag "$DISTTAG"
+
+      - name: check the registry
+        if: steps.release.outputs.todo == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          # the version document is right at once; the package document can lag for minutes
+          for i in $(seq 1 30); do
+            got="$(curl -fsS "https://registry.npmjs.org/@lmctl-ai%2flmwebtest/$VERSION" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const d=JSON.parse(s);console.log(d.version+" "+(d.dist.attestations?"provenance":"none"))})' || true)"
+            if [ "$got" = "$VERSION provenance" ]; then echo "registry has $got"; exit 0; fi
+            sleep 10
+          done
+          echo "registry does not show @lmctl-ai/lmwebtest@$VERSION with provenance (last answer: '$got')" >&2
+          exit 1

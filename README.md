@@ -183,6 +183,8 @@ Use `npm link` to register `lmwebtest` locally, then substitute `lmwebtest` for
 
 On every push to `main`, once `test`, `webapp`, `upload` and `playwright-host` all pass, the `release` job picks the next patch version after the latest GitHub release, builds the five executables with `scripts/build-binary.mjs`, smoke-tests the Linux one, and publishes `vX.Y.Z` with `lmwebtest-<os>-<arch>[.exe]`, `SHA256SUMS` and generated notes (asset names are what `lmscript install` downloads). A failing job blocks the release; a re-run of the same commit does not publish twice. For a minor or major bump, publish that release by hand once; the next automatic one continues from it.
 
+The same job then dispatches [`.github/workflows/release.yml`](.github/workflows/release.yml), which publishes that release to npm as `@lmctl-ai/lmwebtest@X.Y.Z` through npm trusted publishing (OIDC, with provenance; no npm token). The version comes from the release tag; the `version` in package.json is not used. release.yml also runs hourly and publishes the latest release if npm does not have it yet; a version already on npm is skipped. To publish one tag by hand: `gh workflow run release.yml -R lmctl-ai/lmwebtest --ref main -f tag=vX.Y.Z`. npm trusts the workflow by its file name, so do not rename release.yml.
+
 ## Durable Memory
 
 Engineering decisions, workflows, and case studies are recorded under [durable-memory/](durable-memory/):
