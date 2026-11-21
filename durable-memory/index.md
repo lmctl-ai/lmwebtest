@@ -11,6 +11,7 @@ The service owns the tool, scaffolding, conventions, and LMScript DSL host. Cons
 - [Architectural decisions in web testing](decisions.md): decisions and workflow separation.
 - [Case study: mock web application](case-study-mock-webapp.md): offline lmmock web app tested through lmhtml DOM extraction.
 - [Adding a check to an integration test](how-to-add-a-check.md): guide for adding integration assertions.
+- [npm releases](npm-release.md): release.yml publishes to npm by OIDC on dispatch; keep package.json on the next GitHub release number; trusted publisher attached by lmauth (0.1.73).
 
 CLI: test, screenshot, run [site|file|dir], init <site> [--url], batch, run --all.
 DSL: `context web: Web`, `context report: Report`, compiled via `_dsl_ cli="lmwebtest"`.
