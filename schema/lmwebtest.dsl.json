@@ -22,6 +22,12 @@
         ],
         "close": [
           { "params": [], "returns": "void" }
+        ],
+        "fetch_status": [
+          { "params": ["string"], "returns": "int" }
+        ],
+        "fetch_header": [
+          { "params": ["string", "string"], "returns": "string" }
         ]
       }
     },
@@ -89,6 +95,21 @@
         ],
         "eval": [
           { "params": ["string"], "returns": "string" }
+        ],
+        "header": [
+          { "params": ["string"], "returns": "string" }
+        ],
+        "console_log": [
+          { "params": [], "returns": "StrList" }
+        ],
+        "page_errors": [
+          { "params": [], "returns": "StrList" }
+        ],
+        "set_viewport": [
+          { "params": ["int", "int"], "returns": "void" }
+        ],
+        "select_option": [
+          { "params": ["string", "string"], "returns": "void" }
         ]
       }
     },
@@ -129,6 +150,9 @@
         ],
         "count": [
           { "params": ["string"], "returns": "int" }
+        ],
+        "select_option": [
+          { "params": ["string"], "returns": "void" }
         ]
       }
     },

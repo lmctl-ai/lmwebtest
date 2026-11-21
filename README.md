@@ -77,6 +77,22 @@ page.save_html("test-results/rendered.html");
 end _lmcode_
 ```
 
+### QA helpers
+
+For checking a page the way a reviewer would, without dropping to the full Playwright host:
+
+| Method | What it does |
+|---|---|
+| `web.set_viewport(w, h)` / `page.set_viewport(w, h)` | Viewport for later navigations and the pages already open / for one page |
+| `page.select_option(selector, value)`, `element.select_option(value)` | Choose an `<option>` by value or label; fires `input` and `change` |
+| `page.console_log()` | Console messages since the page opened, `"type: text"` (`StrList`) |
+| `page.page_errors()` | Uncaught exceptions thrown in the page (`StrList`) |
+| `page.header(name)` | A header of the navigation response, `""` when absent |
+| `web.fetch_status(url)`, `web.fetch_header(url, name)` | Status or one header of a GET without opening a page (assets such as `.wasm`, `.js`, images) |
+
+`web.set_header` also applies to the open browser context; `web.set_user_agent` after the first navigation starts a new
+context for later pages (a context cannot change its user agent).
+
 See [examples/moonshot-pricing.lms](examples/moonshot-pricing.lms) for an end-to-end example acquiring client-rendered pricing tables and handing them to `lmhtml`.
 
 ## Playwright through lmcode (`lmwebtest playwright`)

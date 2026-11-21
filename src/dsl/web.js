@@ -14,6 +14,8 @@ export class Web {
     this._userAgent = null;
     this._extraHeaders = {};
     this._pages = [];
+    // Contexts replaced by set_user_agent stay open (their pages still work) until close().
+    this._retiredContexts = [];
   }
 
   async _ensureBrowser() {
@@ -39,10 +41,18 @@ export class Web {
   async navigate(url, timeoutMs) {
     const context = await this._ensureBrowser();
     const pwPage = await context.newPage();
+    // A context keeps the viewport it was created with; apply the current setting to every new page.
+    await pwPage.setViewportSize(this._viewport);
     const timeout = timeoutMs !== undefined ? Number(timeoutMs) : this._defaultTimeout;
     pwPage.setDefaultTimeout(timeout);
 
+    // Listen before navigating so messages logged while the page loads are kept.
+    const logs = { console: [], errors: [] };
+    pwPage.on('console', msg => logs.console.push(`${msg.type()}: ${msg.text()}`));
+    pwPage.on('pageerror', err => logs.errors.push(String((err && err.message) || err)));
+
     let status = 0;
+    let headers = {};
     try {
       const response = await pwPage.goto(String(url), {
         timeout,
@@ -50,12 +60,13 @@ export class Web {
       });
       if (response) {
         status = response.status();
+        headers = await response.allHeaders();
       }
     } catch (err) {
       throw checkBrowserError(err);
     }
 
-    const page = new Page(this, pwPage, String(url), status, timeout);
+    const page = new Page(this, pwPage, String(url), status, timeout, logs, headers);
     this._pages.push(page);
     return page;
   }
@@ -67,19 +78,55 @@ export class Web {
     }
   }
 
-  set_viewport(width, height) {
+  // Applies to pages navigated from now on and resizes the pages already open.
+  async set_viewport(width, height) {
     this._viewport = { width: Number(width), height: Number(height) };
+    for (const page of this._pages) {
+      if (!page._page.isClosed()) await page._page.setViewportSize(this._viewport);
+    }
   }
 
+  // A browser context cannot change its user agent: later navigations get a new context.
   set_user_agent(ua) {
     this._userAgent = String(ua);
+    if (this._context) {
+      this._retiredContexts.push(this._context);
+      this._context = null;
+    }
   }
 
-  set_header(name, value) {
+  async set_header(name, value) {
     this._extraHeaders[String(name)] = String(value);
+    if (this._context) await this._context.setExtraHTTPHeaders(this._extraHeaders);
+  }
+
+  // HTTP status of a GET without opening a page (assets such as .wasm, .js, images). Uses the
+  // context's cookies, user agent and extra headers.
+  async fetch_status(url) {
+    const response = await this._fetch(url);
+    return BigInt(response.status());
+  }
+
+  // One response header of a GET (name is case-insensitive); '' when absent.
+  async fetch_header(url, name) {
+    const response = await this._fetch(url);
+    return response.headers()[String(name).toLowerCase()] ?? '';
+  }
+
+  async _fetch(url) {
+    const context = await this._ensureBrowser();
+    try {
+      return await context.request.get(String(url), { failOnStatusCode: false, timeout: this._defaultTimeout });
+    } catch (err) {
+      throw checkBrowserError(err);
+    }
   }
 
   async close() {
+    for (const context of this._retiredContexts) {
+      try { await context.close(); } catch {}
+    }
+    this._retiredContexts = [];
     if (this._context) {
       try { await this._context.close(); } catch {}
       this._context = null;
@@ -93,12 +140,39 @@ export class Web {
 }
 
 export class Page {
-  constructor(web, pwPage, url, status, defaultTimeout) {
+  constructor(web, pwPage, url, status, defaultTimeout, logs = { console: [], errors: [] }, headers = {}) {
     this._web = web;
     this._page = pwPage;
     this._url = url;
     this._status = status;
     this._defaultTimeout = defaultTimeout;
+    this._logs = logs;
+    this._headers = headers;
+  }
+
+  // A header of the navigation response (name is case-insensitive); '' when absent.
+  header(name) {
+    return this._headers[String(name).toLowerCase()] ?? '';
+  }
+
+  // Console messages since the page opened, as "type: text" (log, info, warning, error, ...).
+  console_log() {
+    return new StrList(this._logs.console);
+  }
+
+  // Uncaught exceptions thrown in the page since it opened.
+  page_errors() {
+    return new StrList(this._logs.errors);
+  }
+
+  async set_viewport(width, height) {
+    await this._page.setViewportSize({ width: Number(width), height: Number(height) });
+  }
+
+  // Select the <option> whose value or label is value; fires input and change like a user.
+  async select_option(selector, value) {
+    const chosen = await this._page.selectOption(String(selector), String(value));
+    if (chosen.length === 0) throw new Error(`No option "${value}" in ${selector}`);
   }
 
   url() {
@@ -258,6 +332,11 @@ export class Element {
 
   async press(key) {
     await this._handle.press(String(key));
+  }
+
+  async select_option(value) {
+    const chosen = await this._handle.selectOption(String(value));
+    if (chosen.length === 0) throw new Error(`No option "${value}"`);
   }
 
   async select(selector) {
