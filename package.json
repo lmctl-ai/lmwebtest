@@ -1,6 +1,6 @@
 {
   "name": "@lmctl-ai/lmwebtest",
-  "version": "0.1.0",
+  "version": "0.1.73",
   "description": "Lightweight Playwright web page checks and screenshots",
   "license": "MIT",
   "repository": {
